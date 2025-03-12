@@ -1,9 +1,9 @@
 <template>
-  <PitchVisualizer />
+  <VoiceVisual />
 </template>
 
 <script setup>
-import PitchVisualizer from './components/PitchVisualizer.vue';
+import VoiceVisual from './components/organisms/VoiceVisual.vue';
 </script>
 
 <style>
