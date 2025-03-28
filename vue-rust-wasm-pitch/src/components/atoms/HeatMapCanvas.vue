@@ -2,13 +2,6 @@
   <div>
     <div class="canvas-wrapper position-relative">
       <canvas ref="heatmapCanvas" :width="heatmapWidth" :height="heatmapHeight"></canvas>
-      <v-card class="legend-card">
-        <div class="legend-gradient"></div>
-        <div class="d-flex justify-space-between">
-          <span class="text-caption">低</span>
-          <span class="text-caption">高</span>
-        </div>
-      </v-card>
     </div>
     
     <v-row class="mt-2">
@@ -53,9 +46,9 @@ const theme = useTheme();
 const heatmapWidth = 800;
 const heatmapHeight = 300;
 
-// ヒートマップ用データを動的に管理
-const heatmapBuffer: Uint8Array[] = Array.from({ length: heatmapHeight }, () => new Uint8Array(heatmapWidth));
-let currentRow = 0; // ヒートマップの現在行
+// ヒートマップ用データを動的に管理（x軸が時間、y軸が周波数）
+const heatmapBuffer: Uint8Array[] = Array.from({ length: heatmapWidth }, () => new Uint8Array(heatmapHeight));
+let currentColumn = 0; // ヒートマップの現在列
 
 // カラーマップ関数 - 値に応じて色を返す
 const getColor = (value: number): [number, number, number, number] => {
@@ -123,28 +116,32 @@ const updateHeatmap = (frequencyData: Uint8Array) => {
     const dataLength = Math.floor((maxFrequency / nyquist) * frequencyData.length);
     const filteredData = frequencyData.slice(0, dataLength);
 
-    // filteredData をヒートマップの幅に合わせてスケール
-    const scaledFilteredData = new Uint8Array(heatmapWidth);
-    const scaleFactor = filteredData.length / heatmapWidth;
+    // filteredData をヒートマップの高さに合わせてスケール（y軸が周波数になるため）
+    const scaledFilteredData = new Uint8Array(heatmapHeight);
+    const scaleFactor = filteredData.length / heatmapHeight;
 
-    for (let x = 0; x < heatmapWidth; x++) {
-      const sourceIndex = Math.floor(x * scaleFactor);
-      scaledFilteredData[x] = filteredData[sourceIndex];
+    for (let y = 0; y < heatmapHeight; y++) {
+      // 周波数を反転させる（低周波数が下、高周波数が上）
+      const invertedY = heatmapHeight - y - 1;
+      const sourceIndex = Math.floor(y * scaleFactor);
+      scaledFilteredData[invertedY] = filteredData[sourceIndex];
     }
 
-    // 古い行をヒートマップバッファに追加
-    heatmapBuffer[currentRow].set(scaledFilteredData);
+    // 現在の列にデータを追加
+    for (let y = 0; y < heatmapHeight; y++) {
+      heatmapBuffer[currentColumn][y] = scaledFilteredData[y];
+    }
 
-    // 次の行に進む（行の循環）
-    currentRow = (currentRow + 1) % heatmapHeight;
+    // 次の列に進む（列の循環）
+    currentColumn = (currentColumn + 1) % heatmapWidth;
 
     // ピクセルごとの色を設定
     const imageData = ctx.createImageData(width, height);
 
     for (let y = 0; y < height; y++) {
-      const rowIndex = (currentRow + y) % heatmapHeight;
       for (let x = 0; x < width; x++) {
-        const value = heatmapBuffer[rowIndex][x];
+        const columnIndex = (currentColumn + x) % heatmapWidth;
+        const value = heatmapBuffer[columnIndex][y];
         const [r, g, b, a] = getColor(value);
         const index = (y * width + x) * 4;
 
@@ -158,37 +155,43 @@ const updateHeatmap = (frequencyData: Uint8Array) => {
     // ヒートマップを描画
     ctx.putImageData(imageData, 0, 0);
     
-    // 周波数目盛りを描画
+    // 周波数目盛りを描画（y軸）
     ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
     ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
+    ctx.textAlign = 'right';
     
     for (let i = 0; i <= maxFrequency; i += 2000) {
-      const x = (i / maxFrequency) * width;
-      ctx.fillText(`${i/1000}k`, x, height - 5);
+      // 周波数を反転（低周波数が下、高周波数が上）
+      const y = height - (i / maxFrequency) * height;
+      ctx.fillText(`${i/1000}k`, 25, y);
     }
     
-    // 時間軸のラベル
-    ctx.textAlign = 'left';
-    ctx.fillText('時間', 5, 15);
+    // 時間軸のラベル（x軸）
+    ctx.textAlign = 'center';
+    ctx.fillText('時間', width / 2, height - 5);
     
-    // 周波数軸のラベル
-    ctx.textAlign = 'right';
-    ctx.fillText('周波数 (Hz)', width - 5, height - 5);
+    // 周波数軸のラベル（y軸）
+    ctx.textAlign = 'center';
+    ctx.save();
+    ctx.translate(15, height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('周波数 (Hz)', 0, 0);
+    ctx.restore();
     
     // 基本周波数と倍音の位置にマーカーを表示
     if (props.baseFrequency > 50) {
       const fftSize = props.frequencyData.length * 2;
       const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
-      const baseX = (baseIdx / filteredData.length) * width;
+      // 周波数を反転（低周波数が下、高周波数が上）
+      const baseY = height - (baseIdx / filteredData.length) * height;
       
-      if (baseX < width) {
+      if (baseY > 0 && baseY < height) {
         // 基本周波数の位置に三角形のマーカーを描画
         ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
         ctx.beginPath();
-        ctx.moveTo(baseX - 5, 0);
-        ctx.lineTo(baseX + 5, 0);
-        ctx.lineTo(baseX, 10);
+        ctx.moveTo(0, baseY - 5);
+        ctx.lineTo(0, baseY + 5);
+        ctx.lineTo(10, baseY);
         ctx.closePath();
         ctx.fill();
       }
@@ -201,7 +204,7 @@ const harmonic2Queue = ref<number[]>([]);
 const harmonic3Queue = ref<number[]>([]);
 const bandPeakQueue = ref<number[]>([]);
 
-const maxQueueSize = heatmapHeight; // ヒートマップの行数（約5秒分）
+const maxQueueSize = heatmapWidth; // ヒートマップの列数（約5秒分）
 
 // 倍音比率の計算
 const getFrequencyIndex = (freq: number, sampleRate: number, fftSize: number) => {
@@ -307,29 +310,5 @@ canvas {
   width: 100%;
   height: auto;
   display: block;
-}
-
-.legend-card {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background-color: rgba(0, 0, 0, 0.7) !important;
-  padding: 8px;
-  border-radius: 4px;
-  width: 100px;
-}
-
-.legend-gradient {
-  width: 100%;
-  height: 10px;
-  background: linear-gradient(to right,
-    rgb(0, 0, 180),
-    rgb(72, 20, 255),
-    rgb(247, 37, 255),
-    rgb(247, 190, 111),
-    rgb(247, 255, 0)
-  );
-  border-radius: 2px;
-  margin-bottom: 4px;
 }
 </style>

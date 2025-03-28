@@ -53,9 +53,18 @@
       
       <v-col cols="12" md="6">
         <v-card height="100%">
-          <v-card-title>
-            <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
-            周波数ヒートマップ
+          <v-card-title class="d-flex align-center justify-space-between">
+            <div class="d-flex align-center">
+              <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
+              <span>周波数ヒートマップ</span>
+            </div>
+            <v-card class="legend-card">
+              <div class="legend-gradient"></div>
+              <div class="d-flex justify-space-between">
+                <span class="text-caption text-white">低</span>
+                <span class="text-caption text-white">高</span>
+              </div>
+            </v-card>
           </v-card-title>
           <v-card-text>
             <HeatMapCanvas :frequencyData="frequencyData" :base-frequency="currentPitch" />
@@ -138,3 +147,27 @@ const startAudio = async () => {
   }
 };
 </script>
+
+<style scoped>
+.legend-card {
+  background-color: rgb(0, 0, 0) !important;
+  padding: 8px;
+  border-radius: 4px;
+  width: 100px;
+  height: fit-content;
+}
+
+.legend-gradient {
+  width: 100%;
+  height: 10px;
+  background: linear-gradient(to right,
+    rgb(0, 0, 180),
+    rgb(72, 20, 255),
+    rgb(247, 37, 255),
+    rgb(247, 190, 111),
+    rgb(247, 255, 0)
+  );
+  border-radius: 2px;
+  margin-bottom: 4px;
+}
+</style>

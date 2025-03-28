@@ -45,7 +45,9 @@ const pitchToNote = computed(() => {
   
   // 音階名を計算
   const octave = Math.floor((roundedNoteNumber + 9) / 12) + 4;
-  const noteName = noteNames[(roundedNoteNumber + 9) % 12];
+  // 負のインデックスを処理するために、12で割った余りを正の値に調整
+  const noteIndex = ((roundedNoteNumber + 9) % 12 + 12) % 12;
+  const noteName = noteNames[noteIndex];
   
   return `${noteName}${octave}`;
 });
