@@ -76,69 +76,68 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
-import init, { McLeodPitchDetector } from "../../wasm/pitch_detection";
+import { ref, onUnmounted } from "vue";
 import PitchCanvas from "../atoms/PitchCanvas.vue";
 import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
+import { audioService, pitchDetectionService } from "../../services";
 import HeatMapCanvas from "../atoms/HeatMapCanvas.vue";
 
 const currentPitch = ref<number>(0);
 const frequencyData = ref<Uint8Array>(new Uint8Array(1024));
 const isProcessing = ref<boolean>(false);
+const animationFrameId = ref<number | null>(null);
 
+// 音声処理を開始する関数
 const startAudio = async () => {
   if (isProcessing.value) return;
   
   isProcessing.value = true;
   
   try {
-    await init();
-    const audioContext = new (window.AudioContext || window.AudioContext)();
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const source = audioContext.createMediaStreamSource(stream);
-
-    // ピッチ検出器を初期化
+    // ピッチ検出サービスを初期化
+    await pitchDetectionService.initialize();
+    
+    // 音声サービスを初期化
+    const { audioContext } = await audioService.initialize();
+    
+    // FFTサイズを設定
     const bufferSize = 2048;
-    const padding = bufferSize / 2;
-    const sampleRate = audioContext.sampleRate;
+    audioService.setFFTSize(bufferSize);
+    
+    // オーディオバッファを作成
+    const audioBuffer = new Float32Array(bufferSize);
+    frequencyData.value = new Uint8Array(audioService.getFrequencyBinCount());
+    
+    // サンプリングレートを取得
+    const sampleRate = audioService.getSampleRate();
+    
+    // 閾値の設定
     const powerThreshold = 0.0001;
     const clarityThreshold = 0.7;
-    const detector = new McLeodPitchDetector(bufferSize, padding);
-
-    const analyser = audioContext.createAnalyser();
-    analyser.fftSize = bufferSize;
-    analyser.minDecibels = -90;
-    analyser.smoothingTimeConstant = 0.85;
-
-    const audioBuffer = new Float32Array(bufferSize);
-    frequencyData.value = new Uint8Array(analyser.frequencyBinCount);
-    source.connect(analyser);
-
-    // 振幅のエネルギー（RMS）計算関数
-    const calculateRMS = (buffer: Float32Array): number => {
-      const sumSquares = buffer.reduce((sum, value) => sum + value * value, 0);
-      return Math.sqrt(sumSquares / buffer.length);
-    };
-
+    
+    // 更新関数
     const update = () => {
-      analyser.getFloatTimeDomainData(audioBuffer);
-      analyser.getByteFrequencyData(frequencyData.value);
-
-      frequencyData.value = new Uint8Array([...frequencyData.value]); // Vueのwatchがバイナリデータの変更を検知出来ないため、参照を変える
-      // 振幅（エネルギー）の計算
-      const amplitude = calculateRMS(audioBuffer);
-
-      if (amplitude < powerThreshold) {
-        currentPitch.value = 0;
-      } else {
-        // ピッチ検出
-        const pitch = detector.detect_pitch(audioBuffer, sampleRate, powerThreshold, clarityThreshold);
-        currentPitch.value = pitch || 0;
-      }
-
-      requestAnimationFrame(update);
+      // 時間領域のデータを取得
+      audioService.getTimeDomainData(audioBuffer);
+      
+      // 周波数領域のデータを取得
+      audioService.getFrequencyData(frequencyData.value);
+      
+      // Vueのリアクティビティを維持するために新しい参照を作成
+      frequencyData.value = new Uint8Array([...frequencyData.value]);
+      
+      // ピッチを検出
+      currentPitch.value = pitchDetectionService.detectPitch(
+        audioBuffer,
+        sampleRate,
+        { powerThreshold, clarityThreshold }
+      );
+      
+      // アニメーションフレームを要求
+      animationFrameId.value = requestAnimationFrame(update);
     };
-
+    
+    // 更新を開始
     update();
   } catch (error) {
     console.error('音声処理の開始に失敗しました:', error);
@@ -146,6 +145,18 @@ const startAudio = async () => {
     alert('マイクへのアクセスが拒否されたか、エラーが発生しました。');
   }
 };
+
+// コンポーネントがアンマウントされたときにリソースを解放
+onUnmounted(() => {
+  if (animationFrameId.value !== null) {
+    cancelAnimationFrame(animationFrameId.value);
+  }
+  
+  audioService.dispose();
+  pitchDetectionService.dispose();
+  
+  isProcessing.value = false;
+});
 </script>
 
 <style scoped>

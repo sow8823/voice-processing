@@ -36,6 +36,7 @@
 <script setup lang="ts">
 import { ref, defineProps, watchEffect, computed, watch, onMounted } from "vue";
 import { useTheme } from "vuetify";
+import { frequencyAnalysisService } from "../../services";
 
 const props = defineProps<{ frequencyData: Uint8Array; baseFrequency: number }>();
 
@@ -117,15 +118,12 @@ const updateHeatmap = (frequencyData: Uint8Array) => {
     const filteredData = frequencyData.slice(0, dataLength);
 
     // filteredData をヒートマップの高さに合わせてスケール（y軸が周波数になるため）
-    const scaledFilteredData = new Uint8Array(heatmapHeight);
-    const scaleFactor = filteredData.length / heatmapHeight;
-
-    for (let y = 0; y < heatmapHeight; y++) {
-      // 周波数を反転させる（低周波数が下、高周波数が上）
-      const invertedY = heatmapHeight - y - 1;
-      const sourceIndex = Math.floor(y * scaleFactor);
-      scaledFilteredData[invertedY] = filteredData[sourceIndex];
-    }
+    const scaledFilteredData = frequencyAnalysisService.scaleFrequencyData(
+      filteredData,
+      heatmapHeight,
+      maxFrequency,
+      sampleRate
+    );
 
     // 現在の列にデータを追加
     for (let y = 0; y < heatmapHeight; y++) {
@@ -208,7 +206,7 @@ const maxQueueSize = heatmapWidth; // ヒートマップの列数（約5秒分�
 
 // 倍音比率の計算
 const getFrequencyIndex = (freq: number, sampleRate: number, fftSize: number) => {
-  return Math.round((freq / sampleRate) * fftSize);
+  return frequencyAnalysisService.getFrequencyIndex(freq, sampleRate, fftSize);
 };
 
 const updateHarmonicRatios = () => {
@@ -253,21 +251,15 @@ const updateHarmonicRatios = () => {
 
 // 5秒間の平均を計算
 const harmonic2Avg = computed(() => {
-  return harmonic2Queue.value.length > 0
-    ? harmonic2Queue.value.reduce((sum, val) => sum + val, 0) / harmonic2Queue.value.length
-    : 0;
+  return frequencyAnalysisService.calculateAverage(harmonic2Queue.value);
 });
 
 const harmonic3Avg = computed(() => {
-  return harmonic3Queue.value.length > 0
-    ? harmonic3Queue.value.reduce((sum, val) => sum + val, 0) / harmonic3Queue.value.length
-    : 0;
+  return frequencyAnalysisService.calculateAverage(harmonic3Queue.value);
 });
 
 const bandPeakAvg = computed(() => {
-  return bandPeakQueue.value.length > 0
-    ? bandPeakQueue.value.reduce((sum, val) => sum + val, 0) / bandPeakQueue.value.length
-    : 0;
+  return frequencyAnalysisService.calculateAverage(bandPeakQueue.value);
 });
 
 // テーマが変更されたときに再描画

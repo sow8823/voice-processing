@@ -27,29 +27,15 @@
 <script setup lang="ts">
 import { ref, defineProps, watch, computed, onMounted } from "vue";
 import { useTheme } from "vuetify";
+import { PitchDetectionService } from "../../services";
 
 const props = defineProps<{ currentPitch: number }>();
 const pitchCanvas = ref<HTMLCanvasElement | null>(null);
 const theme = useTheme();
 
-// 音階変換のヘルパー関数
-const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
+// 音階名を計算
 const pitchToNote = computed(() => {
-  if (props.currentPitch < 20) return '-';
-  
-  // A4 = 440Hz を基準に計算
-  const a4 = 440;
-  const noteNumber = 12 * (Math.log(props.currentPitch / a4) / Math.log(2));
-  const roundedNoteNumber = Math.round(noteNumber);
-  
-  // 音階名を計算
-  const octave = Math.floor((roundedNoteNumber + 9) / 12) + 4;
-  // 負のインデックスを処理するために、12で割った余りを正の値に調整
-  const noteIndex = ((roundedNoteNumber + 9) % 12 + 12) % 12;
-  const noteName = noteNames[noteIndex];
-  
-  return `${noteName}${octave}`;
+  return PitchDetectionService.frequencyToNoteName(props.currentPitch);
 });
 
 // ピッチインジケーターを描画

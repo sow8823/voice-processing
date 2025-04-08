@@ -35,6 +35,7 @@
 <script setup lang="ts">
 import { ref, defineProps, watchEffect, computed, watch, onMounted } from "vue";
 import { useTheme } from "vuetify";
+import { frequencyAnalysisService } from "../../services";
 
 // キャンバスサイズ
 const canvasWidth = 800;
@@ -193,59 +194,33 @@ const drawFrequencySpectrum = (frequencyData: Uint8Array) => {
   }
 };
 
-// 2倍音、3倍音、および 2.8kHz ~ 3.2kHz の最大振幅を計算
+// 周波数インデックスの計算をサービスに委譲
 const getFrequencyIndex = (freq: number, sampleRate: number, fftSize: number) => {
-  return Math.round((freq / sampleRate) * fftSize);
+  return frequencyAnalysisService.getFrequencyIndex(freq, sampleRate, fftSize);
 };
 
+// 倍音分析の結果を計算
+const harmonicAnalysis = computed(() => {
+  return frequencyAnalysisService.analyzeHarmonics(
+    props.frequencyData,
+    props.baseFrequency,
+    44100 // サンプリングレート
+  );
+});
+
+// 2倍音の強度比率
 const harmonic2Ratio = computed(() => {
-  if (!props.baseFrequency || props.baseFrequency < 50) return 0;
-  const sampleRate = 44100;
-  const fftSize = props.frequencyData.length * 2;
-  const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
-  const harmonic2Idx = getFrequencyIndex(props.baseFrequency * 2, sampleRate, fftSize);
-  
-  if (harmonic2Idx >= props.frequencyData.length) return 0;
-  
-  const baseAmp = props.frequencyData[baseIdx] || 1;
-  const harmonic2Amp = props.frequencyData[harmonic2Idx] || 0;
-  
-  return (harmonic2Amp / baseAmp) * 100;
+  return harmonicAnalysis.value.harmonic2Ratio;
 });
 
+// 3倍音の強度比率
 const harmonic3Ratio = computed(() => {
-  if (!props.baseFrequency || props.baseFrequency < 50) return 0;
-  const sampleRate = 44100;
-  const fftSize = props.frequencyData.length * 2;
-  const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
-  const harmonic3Idx = getFrequencyIndex(props.baseFrequency * 3, sampleRate, fftSize);
-
-  if (harmonic3Idx >= props.frequencyData.length) return 0;
-
-  const baseAmp = props.frequencyData[baseIdx] || 1;
-  const harmonic3Amp = props.frequencyData[harmonic3Idx] || 0;
-
-  return (harmonic3Amp / baseAmp) * 100;
+  return harmonicAnalysis.value.harmonic3Ratio;
 });
 
+// 特定の周波数帯域の最大成分比率
 const bandPeakRatio = computed(() => {
-  if (!props.baseFrequency || props.baseFrequency < 50) return 0;
-  const sampleRate = 44100;
-  const fftSize = props.frequencyData.length * 2;
-  const startIdx = getFrequencyIndex(2800, sampleRate, fftSize);
-  const endIdx = getFrequencyIndex(3200, sampleRate, fftSize);
-
-  let maxAmp = 0;
-  for (let i = startIdx; i <= endIdx; i++) {
-    if (i < props.frequencyData.length && props.frequencyData[i] > maxAmp) {
-      maxAmp = props.frequencyData[i];
-    }
-  }
-
-  const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
-  const baseAmp = props.frequencyData[baseIdx] || 1;
-
-  return (maxAmp / baseAmp) * 100;
+  return harmonicAnalysis.value.bandPeakRatio;
 });
 
 // テーマが変更されたときに再描画
