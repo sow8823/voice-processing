@@ -71,18 +71,18 @@ const drawPitchIndicator = (pitch: number) => {
     
     // 目盛りのラベルを描画
     ctx.fillStyle = textColor;
-    ctx.font = '12px sans-serif';
+    ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
     for (let i = 0; i <= 2000; i += 200) {
       const tickX = (i / 2000) * width;
-      ctx.fillText(`${i}`, tickX, height - 10);
+      ctx.fillText(`${i}`, tickX, height - 15);
     }
     
     // 単位を表示
     ctx.fillStyle = textColor;
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText('Hz', width - 10, height - 10);
+    ctx.fillText('Hz', width - 5, height - 5);
     
     if (pitch > 0) {
       // ピッチマーカーを描画

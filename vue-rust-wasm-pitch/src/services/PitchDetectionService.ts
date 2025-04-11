@@ -20,7 +20,7 @@ export class PitchDetectionService {
       bufferSize: 2048,
       padding: 1024,
       powerThreshold: 0.0001,
-      clarityThreshold: 0.7,
+      clarityThreshold: 0.9,
       ...options
     };
   }

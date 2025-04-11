@@ -1,4 +1,4 @@
-<template>
+<!-- <template>
   <div>
     <h1>リアルタイムピッチ検出と周波数特性</h1>
     <button @click="startAudio">音声処理を開始</button>
@@ -206,4 +206,4 @@ canvas {
   margin-bottom: 20px;
 }
 </style>
-
+ -->
