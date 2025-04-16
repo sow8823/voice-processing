@@ -2,18 +2,9 @@
 /* eslint-disable */
 export class McLeodPitchDetector {
   free(): void;
-  /**
-   * @param {number} buffer_size
-   * @param {number} padding
-   */
   constructor(buffer_size: number, padding: number);
   /**
    * ピッチ検出用関数
-   * @param {Float32Array} audio_buffer
-   * @param {number} sample_rate
-   * @param {number} power_threshold
-   * @param {number} clarity_threshold
-   * @returns {number | undefined}
    */
   detect_pitch(audio_buffer: Float32Array, sample_rate: number, power_threshold: number, clarity_threshold: number): number | undefined;
 }
@@ -24,7 +15,7 @@ export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly __wbg_mcleodpitchdetector_free: (a: number, b: number) => void;
   readonly mcleodpitchdetector_new: (a: number, b: number) => number;
-  readonly mcleodpitchdetector_detect_pitch: (a: number, b: number, c: number, d: number, e: number, f: number) => Array;
+  readonly mcleodpitchdetector_detect_pitch: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
   readonly __wbindgen_export_0: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_start: () => void;

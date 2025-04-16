@@ -75,7 +75,7 @@ export class McLeodPitchDetector {
         const ptr0 = passArrayF32ToWasm0(audio_buffer, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.mcleodpitchdetector_detect_pitch(this.__wbg_ptr, ptr0, len0, sample_rate, power_threshold, clarity_threshold);
-        return ret[0] === 0 ? undefined : ret[1];
+        return ret === 0x100000001 ? undefined : ret;
     }
 }
 
@@ -113,9 +113,6 @@ async function __wbg_load(module, imports) {
 function __wbg_get_imports() {
     const imports = {};
     imports.wbg = {};
-    imports.wbg.__wbindgen_throw = function(arg0, arg1) {
-        throw new Error(getStringFromWasm0(arg0, arg1));
-    };
     imports.wbg.__wbindgen_init_externref_table = function() {
         const table = wasm.__wbindgen_export_0;
         const offset = table.grow(4);
@@ -125,6 +122,9 @@ function __wbg_get_imports() {
         table.set(offset + 2, true);
         table.set(offset + 3, false);
         ;
+    };
+    imports.wbg.__wbindgen_throw = function(arg0, arg1) {
+        throw new Error(getStringFromWasm0(arg0, arg1));
     };
 
     return imports;

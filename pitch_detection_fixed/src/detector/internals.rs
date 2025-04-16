@@ -107,20 +107,19 @@ where
                 .collect();
             
             // 半分の周波数に十分な強度のピークがあるか確認
-            // 閾値は元の閾値と同じにする（緩和しない）
-            let half_threshold = clarity_threshold;
-            if let Some(half_peak) = choose_peak(half_freq_peaks.into_iter(), half_threshold) {
+            // 半分の周波数のピークを検出するための閾値は、元のピークの明瞭度に基づいて設定する
+            // これにより、power_thresholdとclarity_thresholdの混合を避ける
+            let half_clarity_threshold = clarity;
+            if let Some(half_peak) = choose_peak(half_freq_peaks.into_iter(), half_clarity_threshold) {
                 let corrected_half_peak = correct_peak(half_peak, input, correction);
                 let half_frequency = sample_rate / corrected_half_peak.0;
                 let half_clarity = corrected_half_peak.1 / input[0];
                 
-                // 半分の周波数のピークの尤度が元のピークの尤度の一定割合以上なら、半分の周波数を採用
-                if half_clarity >= clarity * T::from_f64(0.3).unwrap() {
-                    return Some(Pitch {
-                        frequency: half_frequency,
-                        clarity: half_clarity,
-                    });
-                }
+                // 半分の周波数のピークが検出されたら、それを採用
+                return Some(Pitch {
+                    frequency: half_frequency,
+                    clarity: half_clarity,
+                });
             }
         }
         
