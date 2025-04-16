@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
-use pitch_detection::detector::mcleod::McLeodDetector;
-use pitch_detection::detector::PitchDetector as McLeodPitchTrait;
+use pitch_detection_fixed::detector::mcleod::McLeodDetector;
+use pitch_detection_fixed::detector::PitchDetector as McLeodPitchTrait;
 
 #[wasm_bindgen]
 pub struct McLeodPitchDetector {
