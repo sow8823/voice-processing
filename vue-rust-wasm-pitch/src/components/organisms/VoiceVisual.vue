@@ -112,7 +112,7 @@ const startAudio = async () => {
     const sampleRate = audioService.getSampleRate();
     
     // 閾値の設定
-    const powerThreshold = 0.0001;
+    const powerThreshold = 0.001;
     const clarityThreshold = 0.7;
     
     // 更新関数

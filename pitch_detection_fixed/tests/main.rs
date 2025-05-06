@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use pitch_detection_fixed::detector::mcleod::McLeodDetector;
+use pitch_detection_fixed::detector::pmpm::ProbabilisticMcLeodDetector;
 use pitch_detection_fixed::detector::PitchDetector;
 use pitch_detection_fixed::detector::{autocorrelation::AutocorrelationDetector, yin::YINDetector};
 use pitch_detection_fixed::float::Float;
@@ -26,6 +27,11 @@ fn mcleod_sin_signal() {
 }
 
 #[test]
+fn pmpm_sin_signal() {
+    pure_frequency(String::from("PMPM"), String::from("sin"), 440.0);
+}
+
+#[test]
 fn yin_sin_signal() {
     pure_frequency(String::from("YIN"), String::from("sin"), 440.0);
 }
@@ -42,6 +48,11 @@ fn autocorrelation_square_signal() {
 #[test]
 fn mcleod_square_signal() {
     pure_frequency(String::from("McLeod"), String::from("square"), 440.0);
+}
+
+#[test]
+fn pmpm_square_signal() {
+    pure_frequency(String::from("PMPM"), String::from("square"), 440.0);
 }
 
 #[test]
@@ -64,6 +75,11 @@ fn mcleod_triangle_signal() {
 }
 
 #[test]
+fn pmpm_triangle_signal() {
+    pure_frequency(String::from("PMPM"), String::from("triangle"), 440.0);
+}
+
+#[test]
 fn yin_triangle_signal() {
     pure_frequency(String::from("YIN"), String::from("triangle"), 440.0);
 }
@@ -83,6 +99,13 @@ fn mcleod_violin_d4() {
 }
 
 #[test]
+fn pmpm_violin_d4() {
+    let signal: Signal<f64> = wav_file_to_signal(samples_path("violin-D4.wav"), 0, 10 * 1024);
+
+    raw_frequency("PMPM".into(), signal, 293.);
+}
+
+#[test]
 fn autocorrelation_violin_f4() {
     let signal: Signal<f64> = wav_file_to_signal(samples_path("violin-F4.wav"), 0, 10 * 1024);
 
@@ -97,6 +120,13 @@ fn mcleod_violin_f4() {
 }
 
 #[test]
+fn pmpm_violin_f4() {
+    let signal: Signal<f64> = wav_file_to_signal(samples_path("violin-F4.wav"), 0, 10 * 1024);
+
+    raw_frequency("PMPM".into(), signal, 349.);
+}
+
+#[test]
 fn autocorrelation_violin_g4() {
     let signal: Signal<f64> = wav_file_to_signal(samples_path("violin-G4.wav"), 0, 10 * 1024);
 
@@ -108,6 +138,13 @@ fn mcleod_violin_g4() {
     let signal: Signal<f64> = wav_file_to_signal(samples_path("violin-G4.wav"), 0, 10 * 1024);
 
     raw_frequency("McLeod".into(), signal, 392.);
+}
+
+#[test]
+fn pmpm_violin_g4() {
+    let signal: Signal<f64> = wav_file_to_signal(samples_path("violin-G4.wav"), 0, 10 * 1024);
+
+    raw_frequency("PMPM".into(), signal, 392.);
 }
 
 #[test]
@@ -259,6 +296,9 @@ fn detector_factory(name: String, window: usize, padding: usize) -> Box<dyn Pitc
     match name.as_ref() {
         "McLeod" => {
             return Box::new(McLeodDetector::<f64>::new(window, padding));
+        }
+        "PMPM" => {
+            return Box::new(ProbabilisticMcLeodDetector::<f64>::new(window, padding));
         }
         "Autocorrelation" => {
             return Box::new(AutocorrelationDetector::<f64>::new(window, padding));

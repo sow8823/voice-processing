@@ -1,18 +1,18 @@
 use wasm_bindgen::prelude::*;
-use pitch_detection_fixed::detector::mcleod::McLeodDetector;
-use pitch_detection_fixed::detector::PitchDetector as McLeodPitchTrait;
+use pitch_detection_fixed::detector::pmpm::ProbabilisticMcLeodDetector;
+use pitch_detection_fixed::detector::PitchDetector as PitchDetectorTrait;
 
 #[wasm_bindgen]
-pub struct McLeodPitchDetector {
-    detector: McLeodDetector<f32>,
+pub struct ProbabilisticMcLeodPitchDetector {
+    detector: ProbabilisticMcLeodDetector<f32>,
 }
 
 #[wasm_bindgen]
-impl McLeodPitchDetector {
+impl ProbabilisticMcLeodPitchDetector {
     #[wasm_bindgen(constructor)]
-    pub fn new(buffer_size: usize, padding: usize) -> McLeodPitchDetector {
-        let detector = McLeodDetector::new(buffer_size, padding);
-        McLeodPitchDetector { detector }
+    pub fn new(buffer_size: usize, padding: usize) -> ProbabilisticMcLeodPitchDetector {
+        let detector = ProbabilisticMcLeodDetector::new(buffer_size, padding);
+        ProbabilisticMcLeodPitchDetector { detector }
     }
 
     /// ピッチ検出用関数

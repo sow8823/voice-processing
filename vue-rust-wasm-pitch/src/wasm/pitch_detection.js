@@ -36,31 +36,31 @@ function passArrayF32ToWasm0(arg, malloc) {
     return ptr;
 }
 
-const McLeodPitchDetectorFinalization = (typeof FinalizationRegistry === 'undefined')
+const ProbabilisticMcLeodPitchDetectorFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_mcleodpitchdetector_free(ptr >>> 0, 1));
+    : new FinalizationRegistry(ptr => wasm.__wbg_probabilisticmcleodpitchdetector_free(ptr >>> 0, 1));
 
-export class McLeodPitchDetector {
+export class ProbabilisticMcLeodPitchDetector {
 
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
-        McLeodPitchDetectorFinalization.unregister(this);
+        ProbabilisticMcLeodPitchDetectorFinalization.unregister(this);
         return ptr;
     }
 
     free() {
         const ptr = this.__destroy_into_raw();
-        wasm.__wbg_mcleodpitchdetector_free(ptr, 0);
+        wasm.__wbg_probabilisticmcleodpitchdetector_free(ptr, 0);
     }
     /**
      * @param {number} buffer_size
      * @param {number} padding
      */
     constructor(buffer_size, padding) {
-        const ret = wasm.mcleodpitchdetector_new(buffer_size, padding);
+        const ret = wasm.probabilisticmcleodpitchdetector_new(buffer_size, padding);
         this.__wbg_ptr = ret >>> 0;
-        McLeodPitchDetectorFinalization.register(this, this.__wbg_ptr, this);
+        ProbabilisticMcLeodPitchDetectorFinalization.register(this, this.__wbg_ptr, this);
         return this;
     }
     /**
@@ -74,7 +74,7 @@ export class McLeodPitchDetector {
     detect_pitch(audio_buffer, sample_rate, power_threshold, clarity_threshold) {
         const ptr0 = passArrayF32ToWasm0(audio_buffer, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.mcleodpitchdetector_detect_pitch(this.__wbg_ptr, ptr0, len0, sample_rate, power_threshold, clarity_threshold);
+        const ret = wasm.probabilisticmcleodpitchdetector_detect_pitch(this.__wbg_ptr, ptr0, len0, sample_rate, power_threshold, clarity_threshold);
         return ret === 0x100000001 ? undefined : ret;
     }
 }

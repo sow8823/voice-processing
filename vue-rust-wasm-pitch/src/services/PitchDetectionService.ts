@@ -1,7 +1,7 @@
 /**
  * ピッチ検出を担当するサービス
  */
-import init, { McLeodPitchDetector } from "../wasm/pitch_detection";
+import init, { ProbabilisticMcLeodPitchDetector } from "../wasm/pitch_detection";
 
 export interface PitchDetectionOptions {
   bufferSize: number;
@@ -11,7 +11,7 @@ export interface PitchDetectionOptions {
 }
 
 export class PitchDetectionService {
-  private detector: McLeodPitchDetector | null = null;
+  private detector: ProbabilisticMcLeodPitchDetector | null = null;
   private isInitialized = false;
   private options: PitchDetectionOptions;
 
@@ -36,7 +36,7 @@ export class PitchDetectionService {
       await init();
       
       // ピッチ検出器を作成
-      this.detector = new McLeodPitchDetector(
+      this.detector = new ProbabilisticMcLeodPitchDetector(
         this.options.bufferSize,
         this.options.padding
       );

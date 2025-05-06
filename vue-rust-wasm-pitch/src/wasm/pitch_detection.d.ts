@@ -1,6 +1,6 @@
 /* tslint:disable */
 /* eslint-disable */
-export class McLeodPitchDetector {
+export class ProbabilisticMcLeodPitchDetector {
   free(): void;
   constructor(buffer_size: number, padding: number);
   /**
@@ -13,9 +13,9 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly __wbg_mcleodpitchdetector_free: (a: number, b: number) => void;
-  readonly mcleodpitchdetector_new: (a: number, b: number) => number;
-  readonly mcleodpitchdetector_detect_pitch: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+  readonly __wbg_probabilisticmcleodpitchdetector_free: (a: number, b: number) => void;
+  readonly probabilisticmcleodpitchdetector_new: (a: number, b: number) => number;
+  readonly probabilisticmcleodpitchdetector_detect_pitch: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
   readonly __wbindgen_export_0: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_start: () => void;

@@ -9,6 +9,7 @@ pub mod autocorrelation;
 #[doc(hidden)]
 pub mod internals;
 pub mod mcleod;
+pub mod pmpm;
 pub mod yin;
 
 /// A uniform interface to all pitch-detection algorithms.
