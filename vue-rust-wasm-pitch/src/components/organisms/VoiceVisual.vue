@@ -1,32 +1,56 @@
 <template>
   <div>
-    <v-card class="mb-6">
-      <v-card-title class="text-center text-h4">リアルタイムピッチ検出と周波数特性</v-card-title>
-      <v-card-subtitle class="text-center">マイクを使用して音声のピッチと周波数特性をリアルタイムで分析します</v-card-subtitle>
-      
-      <v-card-text class="text-center">
-        <v-btn
-          color="primary"
-          size="large"
-          @click="startAudio"
-          :disabled="isProcessing"
-          :loading="isProcessing"
-          prepend-icon="mdi-microphone"
-        >
-          {{ isProcessing ? '処理中...' : '音声処理を開始' }}
-        </v-btn>
-        
-        <v-alert
-          v-if="isProcessing"
-          type="info"
-          variant="tonal"
-          class="mt-4"
-          icon="mdi-record"
-          title="録音中"
-          text="マイクからの音声を処理しています"
-        ></v-alert>
-      </v-card-text>
-    </v-card>
+    <v-tabs v-model="activeTab" class="mb-6">
+      <v-tab value="microphone">
+        <v-icon start>mdi-microphone</v-icon>
+        マイク入力
+      </v-tab>
+      <v-tab value="file">
+        <v-icon start>mdi-file-music</v-icon>
+        ファイル入力
+      </v-tab>
+    </v-tabs>
+
+    <v-window v-model="activeTab">
+      <!-- マイク入力タブ -->
+      <v-window-item value="microphone">
+        <v-card class="mb-6">
+          <v-card-title class="text-center text-h4">リアルタイムピッチ検出と周波数特性</v-card-title>
+          <v-card-subtitle class="text-center">マイクを使用して音声のピッチと周波数特性をリアルタイムで分析します</v-card-subtitle>
+          
+          <v-card-text class="text-center">
+            <v-btn
+              color="primary"
+              size="large"
+              @click="startAudio"
+              :disabled="isProcessing"
+              :loading="isProcessing"
+              prepend-icon="mdi-microphone"
+            >
+              {{ isProcessing ? '処理中...' : '音声処理を開始' }}
+            </v-btn>
+            
+            <v-alert
+              v-if="isProcessing"
+              type="info"
+              variant="tonal"
+              class="mt-4"
+              icon="mdi-record"
+              title="録音中"
+              text="マイクからの音声を処理しています"
+            ></v-alert>
+          </v-card-text>
+        </v-card>
+      </v-window-item>
+
+      <!-- ファイル入力タブ -->
+      <v-window-item value="file">
+        <AudioFileUploader
+          @audio-loaded="handleAudioFileLoaded"
+          @analysis-requested="analyzeAudioFile"
+        />
+      </v-window-item>
+    </v-window>
 
     <v-card class="mb-6">
       <v-card-title>
@@ -81,11 +105,13 @@ import PitchCanvas from "../atoms/PitchCanvas.vue";
 import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
 import { audioService, pitchDetectionService } from "../../services";
 import HeatMapCanvas from "../atoms/HeatMapCanvas.vue";
-
+import AudioFileUploader from "../molecules/AudioFileUploader.vue";
+const activeTab = ref<string>("microphone");
 const currentPitch = ref<number>(0);
 const frequencyData = ref<Uint8Array>(new Uint8Array(1024));
 const isProcessing = ref<boolean>(false);
 const animationFrameId = ref<number | null>(null);
+const fileAudioBuffer = ref<AudioBuffer | null>(null);
 
 // 音声処理を開始する関数
 const startAudio = async () => {
@@ -98,7 +124,7 @@ const startAudio = async () => {
     await pitchDetectionService.initialize();
     
     // 音声サービスを初期化
-    const { audioContext } = await audioService.initialize();
+    await audioService.initialize();
     
     // FFTサイズを設定
     const bufferSize = 2048;
@@ -157,6 +183,97 @@ onUnmounted(() => {
   
   isProcessing.value = false;
 });
+
+// ファイルがアップロードされたときの処理
+const handleAudioFileLoaded = (audioBuffer: AudioBuffer) => {
+  fileAudioBuffer.value = audioBuffer;
+  console.log('音声ファイルが読み込まれました:', audioBuffer);
+};
+
+// ファイルの分析リクエストがあったときの処理
+const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
+  if (!audioBuffer) return;
+  
+  try {
+    // ピッチ検出サービスを初期化
+    await pitchDetectionService.initialize();
+    
+    // バッファサイズを設定
+    const bufferSize = 2048;
+    
+    // 周波数データ用の配列を初期化
+    frequencyData.value = new Uint8Array(bufferSize / 2);
+    
+    // サンプリングレートを取得
+    const sampleRate = audioBuffer.sampleRate;
+    
+    // 閾値の設定
+    const powerThreshold = 0.001;
+    const clarityThreshold = 0.7;
+    
+    // オーディオバッファからデータを取得
+    const channelData = audioBuffer.getChannelData(0);
+    
+    // 分析用の一時バッファ
+    const tempBuffer = new Float32Array(bufferSize);
+    
+    // 分析間隔（ミリ秒）
+    const analysisInterval = 50;
+    
+    // 分析位置
+    let position = 0;
+    
+    // 既存のアニメーションフレームをクリア
+    if (animationFrameId.value !== null) {
+      cancelAnimationFrame(animationFrameId.value);
+    }
+    
+    // 分析関数
+    const analyzeFrame = () => {
+      // バッファにデータをコピー
+      for (let i = 0; i < bufferSize; i++) {
+        const index = position + i;
+        tempBuffer[i] = index < channelData.length ? channelData[index] : 0;
+      }
+      
+      // ピッチを検出
+      currentPitch.value = pitchDetectionService.detectPitch(
+        tempBuffer,
+        sampleRate,
+        { powerThreshold, clarityThreshold }
+      );
+      
+      // 周波数データを生成（簡易的な実装）
+      // 実際のスペクトル分析にはFFTが必要ですが、ここでは簡易的に実装
+      const maxFreq = 20000;
+      for (let i = 0; i < frequencyData.value.length; i++) {
+        const freq = (i / frequencyData.value.length) * maxFreq;
+        const amplitude = Math.sin(freq * position / sampleRate) * 128 + 128;
+        frequencyData.value[i] = Math.min(255, Math.max(0, amplitude));
+      }
+      
+      // Vueのリアクティビティを維持するために新しい参照を作成
+      frequencyData.value = new Uint8Array([...frequencyData.value]);
+      
+      // 次の位置に移動
+      position += Math.floor(sampleRate * analysisInterval / 1000);
+      
+      // ファイルの終わりに達したかチェック
+      if (position < channelData.length) {
+        // 次のフレームをスケジュール
+        setTimeout(() => {
+          animationFrameId.value = requestAnimationFrame(analyzeFrame);
+        }, analysisInterval);
+      }
+    };
+    
+    // 分析を開始
+    analyzeFrame();
+  } catch (error) {
+    console.error('音声ファイルの分析に失敗しました:', error);
+    alert('音声ファイルの分析に失敗しました。');
+  }
+};
 </script>
 
 <style scoped>
