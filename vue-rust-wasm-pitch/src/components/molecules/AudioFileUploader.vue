@@ -37,13 +37,13 @@
             
             <div class="d-flex justify-space-between align-center mt-4">
               <v-btn
-                color="primary"
-                prepend-icon="mdi-play"
-                @click="playAudio"
-                :disabled="!audioUrl || isAnalyzing"
-                :loading="isAnalyzing"
+                :color="isPlaying ? 'error' : 'primary'"
+                :prepend-icon="isPlaying ? 'mdi-stop' : 'mdi-play'"
+                @click="togglePlayback"
+                :disabled="!audioUrl"
+                :loading="isLoading"
               >
-                再生と分析
+                {{ isPlaying ? '停止' : '再生と分析' }}
               </v-btn>
               
               <v-btn
@@ -51,7 +51,7 @@
                 variant="outlined"
                 prepend-icon="mdi-delete"
                 @click="clearAudio"
-                :disabled="!audioUrl"
+                :disabled="!audioUrl || isPlaying"
               >
                 クリア
               </v-btn>
@@ -71,6 +71,7 @@ const emit = defineEmits<{
   (e: 'audio-loaded', audioBuffer: AudioBuffer): void;
   (e: 'analysis-requested', audioBuffer: AudioBuffer): void;
   (e: 'playback-ended'): void;
+  (e: 'playback-stopped'): void;
 }>();
 
 // リアクティブな状態
@@ -80,6 +81,8 @@ const audioPlayer = ref<HTMLAudioElement | null>(null);
 const audioContext = ref<AudioContext | null>(null);
 const audioBuffer = ref<AudioBuffer | null>(null);
 const isAnalyzing = ref<boolean>(false);
+const isPlaying = ref<boolean>(false);
+const isLoading = ref<boolean>(false);
 
 // バリデーションルール
 const rules = {
@@ -131,27 +134,72 @@ const handleAudioLoaded = async () => {
   }
 };
 
+// 再生/停止のトグルハンドラ
+const togglePlayback = () => {
+  if (isPlaying.value) {
+    stopAudio();
+  } else {
+    playAudio();
+  }
+};
+
 // 再生ボタンのクリックハンドラ - 再生と分析を同時に行う
-const playAudio = () => {
+const playAudio = async () => {
   if (!audioBuffer.value || !audioPlayer.value) return;
   
-  isAnalyzing.value = true;
+  isLoading.value = true;
   
   try {
     // 再生を開始
-    audioPlayer.value.play();
+    await audioPlayer.value.play();
+    
+    // 状態を更新
+    isPlaying.value = true;
+    isAnalyzing.value = true;
+    
+    console.log('音声ファイルの再生を開始しました');
     
     // 分析リクエストを発火
     emit('analysis-requested', audioBuffer.value);
   } catch (error) {
     console.error('音声再生・分析に失敗しました:', error);
     alert('音声再生・分析に失敗しました。');
+    isPlaying.value = false;
     isAnalyzing.value = false;
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+// 停止ハンドラ
+const stopAudio = () => {
+  if (!audioPlayer.value) return;
+  
+  try {
+    // 再生を停止
+    audioPlayer.value.pause();
+    audioPlayer.value.currentTime = 0;
+    
+    // 状態を更新
+    isPlaying.value = false;
+    isAnalyzing.value = false;
+    
+    console.log('音声ファイルの再生を停止しました');
+    
+    // 停止イベントを発火
+    emit('playback-stopped');
+  } catch (error) {
+    console.error('音声停止に失敗しました:', error);
   }
 };
 
 // クリアボタンのクリックハンドラ
 const clearAudio = () => {
+  // 再生中なら停止
+  if (isPlaying.value) {
+    stopAudio();
+  }
+  
   if (audioUrl.value) {
     URL.revokeObjectURL(audioUrl.value);
   }
@@ -164,10 +212,14 @@ const clearAudio = () => {
     audioPlayer.value.pause();
     audioPlayer.value.currentTime = 0;
   }
+  
+  console.log('音声ファイルをクリアしました');
 };
 
 // 音声再生が終了したときの処理
 const handleAudioEnded = () => {
+  console.log('音声再生が終了しました');
+  isPlaying.value = false;
   isAnalyzing.value = false;
   emit('playback-ended');
 };

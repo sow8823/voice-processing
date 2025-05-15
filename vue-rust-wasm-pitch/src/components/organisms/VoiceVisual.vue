@@ -20,14 +20,13 @@
           
           <v-card-text class="text-center">
             <v-btn
-              color="primary"
+              :color="isProcessing ? 'error' : 'primary'"
               size="large"
-              @click="startAudio"
-              :disabled="isProcessing"
-              :loading="isProcessing"
-              prepend-icon="mdi-microphone"
+              @click="toggleAudio"
+              :loading="isLoading"
+              :prepend-icon="isProcessing ? 'mdi-stop' : 'mdi-microphone'"
             >
-              {{ isProcessing ? '処理中...' : '音声処理を開始' }}
+              {{ isProcessing ? '音声処理を終了' : '音声処理を開始' }}
             </v-btn>
             
             <v-alert
@@ -49,6 +48,7 @@
           @audio-loaded="handleAudioFileLoaded"
           @analysis-requested="analyzeAudioFile"
           @playback-ended="handlePlaybackEnded"
+          @playback-stopped="handlePlaybackStopped"
         />
       </v-window-item>
     </v-window>
@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted } from "vue";
+import { ref, onUnmounted, watch } from "vue";
 import PitchCanvas from "../atoms/PitchCanvas.vue";
 import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
 import { audioService, pitchDetectionService } from "../../services";
@@ -111,21 +111,56 @@ const activeTab = ref<string>("microphone");
 const currentPitch = ref<number>(0);
 const frequencyData = ref<Uint8Array>(new Uint8Array(1024));
 const isProcessing = ref<boolean>(false);
+const isLoading = ref<boolean>(false);
 const animationFrameId = ref<number | null>(null);
 const fileAudioBuffer = ref<AudioBuffer | null>(null);
 
+// タブ切り替え時の処理
+watch(activeTab, (newTab, oldTab) => {
+  console.log(`タブが切り替わりました: ${oldTab} -> ${newTab}`);
+  
+  // 前のタブの処理を終了
+  if (oldTab === "microphone" && isProcessing.value) {
+    // マイク入力の処理を終了
+    stopAudio();
+  } else if (oldTab === "file") {
+    // ファイル入力の処理を終了
+    stopFileAnalysis();
+  }
+  
+  // データをリセット
+  resetData();
+});
+
+// データをリセットする関数
+const resetData = () => {
+  currentPitch.value = 0;
+  frequencyData.value = new Uint8Array(1024);
+};
+
+// 音声処理を開始/終了するトグル関数
+const toggleAudio = async () => {
+  if (isProcessing.value) {
+    // 処理中なら停止
+    stopAudio();
+  } else {
+    // 停止中なら開始
+    startAudio();
+  }
+};
+
 // 音声処理を開始する関数
 const startAudio = async () => {
-  if (isProcessing.value) return;
-  
-  isProcessing.value = true;
+  isLoading.value = true;
   
   try {
     // ピッチ検出サービスを初期化
     await pitchDetectionService.initialize();
+    console.log('ピッチ検出サービスを初期化しました');
     
     // 音声サービスを初期化
     await audioService.initialize();
+    console.log('音声サービスを初期化しました');
     
     // FFTサイズを設定
     const bufferSize = 2048;
@@ -137,6 +172,7 @@ const startAudio = async () => {
     
     // サンプリングレートを取得
     const sampleRate = audioService.getSampleRate();
+    console.log(`サンプリングレート: ${sampleRate}Hz`);
     
     // 閾値の設定
     const powerThreshold = 0.001;
@@ -144,45 +180,86 @@ const startAudio = async () => {
     
     // 更新関数
     const update = () => {
-      // 時間領域のデータを取得
-      audioService.getTimeDomainData(audioBuffer);
-      
-      // 周波数領域のデータを取得
-      audioService.getFrequencyData(frequencyData.value);
-      
-      // Vueのリアクティビティを維持するために新しい参照を作成
-      frequencyData.value = new Uint8Array([...frequencyData.value]);
-      
-      // ピッチを検出
-      currentPitch.value = pitchDetectionService.detectPitch(
-        audioBuffer,
-        sampleRate,
-        { powerThreshold, clarityThreshold }
-      );
-      
-      // アニメーションフレームを要求
-      animationFrameId.value = requestAnimationFrame(update);
+      try {
+        // 時間領域のデータを取得
+        audioService.getTimeDomainData(audioBuffer);
+        
+        // 周波数領域のデータを取得
+        audioService.getFrequencyData(frequencyData.value);
+        
+        // Vueのリアクティビティを維持するために新しい参照を作成
+        frequencyData.value = new Uint8Array([...frequencyData.value]);
+        
+        // ピッチを検出
+        currentPitch.value = pitchDetectionService.detectPitch(
+          audioBuffer,
+          sampleRate,
+          { powerThreshold, clarityThreshold }
+        );
+        
+        // アニメーションフレームを要求
+        if (isProcessing.value) {
+          animationFrameId.value = requestAnimationFrame(update);
+        }
+      } catch (frameError) {
+        console.error('フレーム分析中にエラーが発生しました:', frameError);
+        stopAudio();
+      }
     };
     
+    // 処理中フラグを設定
+    isProcessing.value = true;
+    
     // 更新を開始
+    console.log('リアルタイム分析を開始します');
     update();
   } catch (error) {
     console.error('音声処理の開始に失敗しました:', error);
-    isProcessing.value = false;
     alert('マイクへのアクセスが拒否されたか、エラーが発生しました。');
+  } finally {
+    isLoading.value = false;
   }
 };
 
-// コンポーネントがアンマウントされたときにリソースを解放
-onUnmounted(() => {
+// 音声処理を停止する関数
+const stopAudio = () => {
+  console.log('リアルタイム分析を停止します');
+  
+  // アニメーションフレームをキャンセル
   if (animationFrameId.value !== null) {
     cancelAnimationFrame(animationFrameId.value);
+    animationFrameId.value = null;
   }
   
+  // リソースを解放
+  audioService.dispose();
+  
+  // 処理中フラグをリセット
+  isProcessing.value = false;
+  
+  // データをリセット
+  resetData();
+  
+  console.log('リアルタイム分析を停止しました');
+};
+
+
+// コンポーネントがアンマウントされたときにリソースを解放
+onUnmounted(() => {
+  // アニメーションフレームをキャンセル
+  if (animationFrameId.value !== null) {
+    cancelAnimationFrame(animationFrameId.value);
+    animationFrameId.value = null;
+  }
+  
+  // リソースを解放
   audioService.dispose();
   pitchDetectionService.dispose();
   
+  // 処理中フラグをリセット
   isProcessing.value = false;
+  
+  console.log('コンポーネントがアンマウントされました');
 });
 
 // ファイルがアップロードされたときの処理
@@ -300,9 +377,9 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
   }
 };
 
-// 再生終了時の処理
-const handlePlaybackEnded = () => {
-  console.log('再生が終了しました');
+// ファイル分析を停止する関数（共通処理）
+const stopFileAnalysis = () => {
+  console.log('ファイル分析を停止します');
   
   // アニメーションフレームをキャンセル
   if (animationFrameId.value !== null) {
@@ -315,7 +392,22 @@ const handlePlaybackEnded = () => {
   currentPitch.value = 0;
   frequencyData.value = new Uint8Array(frequencyData.value.length);
   
+  // リソースを解放
+  audioService.dispose();
+  
   console.log('分析データをリセットしました');
+};
+
+// 再生終了時の処理
+const handlePlaybackEnded = () => {
+  console.log('再生が終了しました');
+  stopFileAnalysis();
+};
+
+// 再生停止時の処理
+const handlePlaybackStopped = () => {
+  console.log('再生が停止されました');
+  stopFileAnalysis();
 };
 </script>
 
