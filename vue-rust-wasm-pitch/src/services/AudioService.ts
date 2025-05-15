@@ -5,8 +5,10 @@ export class AudioService {
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private stream: MediaStream | null = null;
-  private source: MediaStreamAudioSourceNode | null = null;
+  private source: MediaStreamAudioSourceNode | AudioBufferSourceNode | null = null;
   private isInitialized = false;
+  private fileBuffer: AudioBuffer | null = null;
+  private fileSource: AudioBufferSourceNode | null = null;
 
   /**
    * 音声処理を初期化する
@@ -64,6 +66,7 @@ export class AudioService {
    */
   getTimeDomainData(buffer: Float32Array): void {
     if (this.analyser) {
+      // @ts-expect-error - TypeScriptの型の互換性エラー（ArrayBufferLikeとArrayBufferの互換性）
       this.analyser.getFloatTimeDomainData(buffer);
     }
   }
@@ -74,6 +77,7 @@ export class AudioService {
    */
   getFrequencyData(buffer: Uint8Array): void {
     if (this.analyser) {
+      // @ts-expect-error - TypeScriptの型の互換性エラー（ArrayBufferLikeとArrayBufferの互換性）
       this.analyser.getByteFrequencyData(buffer);
     }
   }
@@ -95,11 +99,127 @@ export class AudioService {
   }
 
   /**
+   * 音声ファイルを設定する
+   * @param audioBuffer 音声ファイルのAudioBuffer
+   */
+  setAudioFileBuffer(audioBuffer: AudioBuffer): void {
+    try {
+      // 既存のファイルソースがあれば切断
+      if (this.fileSource) {
+        try {
+          if (this.fileSourceStarted) {
+            this.fileSource.stop();
+          }
+          this.fileSource.disconnect();
+        } catch (error) {
+          console.warn('既存のファイルソースの停止または切断に失敗しました:', error);
+        }
+        this.fileSource = null;
+      }
+
+      // 新しいファイルバッファを設定
+      this.fileBuffer = audioBuffer;
+
+      // AudioContextが初期化されていない場合は初期化
+      if (!this.audioContext) {
+        this.audioContext = new (window.AudioContext || window.AudioContext)();
+      }
+
+      // アナライザーが初期化されていない場合は初期化
+      if (!this.analyser) {
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.minDecibels = -90;
+        this.analyser.smoothingTimeConstant = 0.85;
+      }
+
+      // ファイルソースは作成するだけで、まだ開始しない
+      this.fileSource = this.audioContext.createBufferSource();
+      this.fileSource.buffer = audioBuffer;
+      this.fileSourceStarted = false;
+
+      // ソースをアナライザーに接続
+      this.fileSource.connect(this.analyser);
+
+      // 音声出力にも接続
+      this.analyser.connect(this.audioContext.destination);
+
+      // ソースを保存
+      this.source = this.fileSource;
+      this.isInitialized = true;
+    } catch (error) {
+      console.error('音声ファイルバッファの設定に失敗しました:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 音声ファイルの再生を開始する
+   */
+  // AudioBufferSourceNodeが開始されているかどうかを追跡するフラグ
+  private fileSourceStarted = false;
+
+  startAudioFile(): void {
+    if (this.audioContext) {
+      try {
+        // 既存のソースがあり、既に開始されている場合は停止
+        if (this.fileSource && this.fileSourceStarted) {
+          try {
+            this.fileSource.stop();
+          } catch (error) {
+            console.warn('ファイルソースの停止に失敗しました:', error);
+          }
+        }
+
+        // 新しいソースを作成
+        this.fileSource = this.audioContext.createBufferSource();
+        this.fileSourceStarted = false;
+
+        if (this.fileBuffer) {
+          this.fileSource.buffer = this.fileBuffer;
+        } else {
+          console.error('ファイルバッファが設定されていません');
+          return;
+        }
+
+        // アナライザーと出力に接続
+        if (this.analyser) {
+          this.fileSource.connect(this.analyser);
+          this.analyser.connect(this.audioContext.destination);
+        } else {
+          console.error('アナライザーが初期化されていません');
+          return;
+        }
+
+        // 再生開始
+        this.fileSource.start();
+        this.fileSourceStarted = true;
+        this.source = this.fileSource;
+      } catch (error) {
+        console.error('音声ファイルの再生開始に失敗しました:', error);
+        throw error;
+      }
+    } else {
+      console.error('AudioContextが初期化されていません');
+    }
+  }
+
+  /**
    * リソースを解放する
    */
   dispose(): void {
     if (this.source) {
       this.source.disconnect();
+    }
+    
+    if (this.fileSource) {
+      try {
+        if (this.fileSourceStarted) {
+          this.fileSource.stop();
+        }
+        this.fileSource.disconnect();
+      } catch (error) {
+        console.warn('ファイルソースの停止または切断に失敗しました:', error);
+      }
     }
     
     if (this.stream) {
@@ -114,7 +234,10 @@ export class AudioService {
     this.analyser = null;
     this.stream = null;
     this.source = null;
+    this.fileSource = null;
+    this.fileBuffer = null;
     this.isInitialized = false;
+    this.fileSourceStarted = false;
   }
 }
 

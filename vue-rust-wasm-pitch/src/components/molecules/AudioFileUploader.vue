@@ -38,12 +38,12 @@
             <div class="d-flex justify-space-between align-center mt-4">
               <v-btn
                 color="primary"
-                variant="outlined"
                 prepend-icon="mdi-play"
                 @click="playAudio"
-                :disabled="!audioUrl"
+                :disabled="!audioUrl || isAnalyzing"
+                :loading="isAnalyzing"
               >
-                再生
+                再生と分析
               </v-btn>
               
               <v-btn
@@ -55,16 +55,6 @@
               >
                 クリア
               </v-btn>
-              
-              <v-btn
-                color="success"
-                prepend-icon="mdi-waveform"
-                @click="analyzeAudio"
-                :disabled="!audioUrl || isAnalyzing"
-                :loading="isAnalyzing"
-              >
-                分析
-              </v-btn>
             </div>
           </v-card>
         </div>
@@ -74,12 +64,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue';
+import { ref, onUnmounted, onMounted, watch } from 'vue';
 
 // イベント
 const emit = defineEmits<{
   (e: 'audio-loaded', audioBuffer: AudioBuffer): void;
   (e: 'analysis-requested', audioBuffer: AudioBuffer): void;
+  (e: 'playback-ended'): void;
 }>();
 
 // リアクティブな状態
@@ -140,10 +131,22 @@ const handleAudioLoaded = async () => {
   }
 };
 
-// 再生ボタンのクリックハンドラ
+// 再生ボタンのクリックハンドラ - 再生と分析を同時に行う
 const playAudio = () => {
-  if (audioPlayer.value) {
+  if (!audioBuffer.value || !audioPlayer.value) return;
+  
+  isAnalyzing.value = true;
+  
+  try {
+    // 再生を開始
     audioPlayer.value.play();
+    
+    // 分析リクエストを発火
+    emit('analysis-requested', audioBuffer.value);
+  } catch (error) {
+    console.error('音声再生・分析に失敗しました:', error);
+    alert('音声再生・分析に失敗しました。');
+    isAnalyzing.value = false;
   }
 };
 
@@ -163,22 +166,31 @@ const clearAudio = () => {
   }
 };
 
-// 分析ボタンのクリックハンドラ
-const analyzeAudio = () => {
-  if (!audioBuffer.value) return;
-  
-  isAnalyzing.value = true;
-  
-  try {
-    // 分析リクエストを発火
-    emit('analysis-requested', audioBuffer.value);
-  } catch (error) {
-    console.error('音声分析に失敗しました:', error);
-    alert('音声分析に失敗しました。');
-  } finally {
-    isAnalyzing.value = false;
-  }
+// 音声再生が終了したときの処理
+const handleAudioEnded = () => {
+  isAnalyzing.value = false;
+  emit('playback-ended');
 };
+
+// audioPlayerの参照が変更されたときにイベントリスナーを設定
+watch(audioPlayer, (newPlayer: HTMLAudioElement | null, oldPlayer: HTMLAudioElement | null) => {
+  // 古いプレーヤーからイベントリスナーを削除
+  if (oldPlayer) {
+    oldPlayer.removeEventListener('ended', handleAudioEnded);
+  }
+  
+  // 新しいプレーヤーにイベントリスナーを追加
+  if (newPlayer) {
+    newPlayer.addEventListener('ended', handleAudioEnded);
+  }
+});
+
+// コンポーネントがマウントされたときのイベントリスナー設定
+onMounted(() => {
+  if (audioPlayer.value) {
+    audioPlayer.value.addEventListener('ended', handleAudioEnded);
+  }
+});
 
 // コンポーネントがアンマウントされたときのクリーンアップ
 onUnmounted(() => {
@@ -188,6 +200,10 @@ onUnmounted(() => {
   
   if (audioContext.value && audioContext.value.state !== 'closed') {
     audioContext.value.close();
+  }
+  
+  if (audioPlayer.value) {
+    audioPlayer.value.removeEventListener('ended', handleAudioEnded);
   }
 });
 </script>
