@@ -92,7 +92,11 @@
             </v-card>
           </v-card-title>
           <v-card-text>
-            <HeatMapCanvas :frequencyData="frequencyData" :base-frequency="currentPitch" />
+            <HeatMapCanvas
+              ref="heatMapCanvasRef"
+              :frequencyData="frequencyData"
+              :base-frequency="currentPitch"
+            />
           </v-card-text>
         </v-card>
       </v-col>
@@ -114,6 +118,7 @@ const isProcessing = ref<boolean>(false);
 const isLoading = ref<boolean>(false);
 const animationFrameId = ref<number | null>(null);
 const fileAudioBuffer = ref<AudioBuffer | null>(null);
+const heatMapCanvasRef = ref<InstanceType<typeof HeatMapCanvas> | null>(null);
 
 // タブ切り替え時の処理
 watch(activeTab, (newTab, oldTab) => {
@@ -154,6 +159,11 @@ const startAudio = async () => {
   isLoading.value = true;
   
   try {
+    // ヒートマップをリセット
+    if (heatMapCanvasRef.value) {
+      heatMapCanvasRef.value.resetHeatmap();
+    }
+    
     // ピッチ検出サービスを初期化
     await pitchDetectionService.initialize();
     console.log('ピッチ検出サービスを初期化しました');
@@ -282,6 +292,11 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
   });
   
   try {
+    // ヒートマップをリセット
+    if (heatMapCanvasRef.value) {
+      heatMapCanvasRef.value.resetHeatmap();
+    }
+    
     // ピッチ検出サービスを初期化
     await pitchDetectionService.initialize();
     console.log('ピッチ検出サービスを初期化しました');

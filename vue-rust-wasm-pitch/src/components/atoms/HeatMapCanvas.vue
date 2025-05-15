@@ -34,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps, watchEffect, computed, watch, onMounted } from "vue";
+import { ref, defineProps, defineExpose, watchEffect, computed, watch, onMounted } from "vue";
 import { useTheme } from "vuetify";
 import { frequencyAnalysisService } from "../../services";
 
@@ -288,6 +288,75 @@ watch(heatmapCanvas, (canvas) => {
   if (canvas) {
     updateHeatmap(props.frequencyData);
   }
+});
+
+// ヒートマップをリセットする関数
+const resetHeatmap = () => {
+  console.log('ヒートマップをリセットします');
+  
+  // ヒートマップバッファをクリア
+  for (let i = 0; i < heatmapWidth; i++) {
+    heatmapBuffer[i].fill(0);
+  }
+  
+  // 現在の列をリセット
+  currentColumn = 0;
+  
+  // キューをクリア
+  harmonic2Queue.value = [];
+  harmonic3Queue.value = [];
+  bandPeakQueue.value = [];
+  
+  // キャンバスをクリア
+  const ctx = heatmapCanvas.value?.getContext("2d");
+  if (ctx) {
+    const width = ctx.canvas.width;
+    const height = ctx.canvas.height;
+    
+    ctx.clearRect(0, 0, width, height);
+    
+    // 背景を黒に設定
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+    ctx.fillRect(0, 0, width, height);
+    
+    // 目盛りを再描画
+    drawScales(ctx, width, height);
+  }
+  
+  console.log('ヒートマップをリセットしました');
+};
+
+// 目盛りを描画する関数
+const drawScales = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+  const maxFrequency = 10000;
+  
+  // 周波数目盛りを描画（y軸）
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'right';
+  
+  for (let i = 0; i <= maxFrequency; i += 2000) {
+    // 周波数を反転（低周波数が下、高周波数が上）
+    const y = height - (i / maxFrequency) * height;
+    ctx.fillText(`${i/1000}k`, 25, y);
+  }
+  
+  // 時間軸のラベル（x軸）
+  ctx.textAlign = 'center';
+  ctx.fillText('時間', width / 2, height - 5);
+  
+  // 周波数軸のラベル（y軸）
+  ctx.textAlign = 'center';
+  ctx.save();
+  ctx.translate(15, height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('周波数 (Hz)', 0, 0);
+  ctx.restore();
+};
+
+// 外部に公開するメソッド
+defineExpose({
+  resetHeatmap
 });
 </script>
 
