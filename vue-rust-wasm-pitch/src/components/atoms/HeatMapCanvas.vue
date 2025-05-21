@@ -129,17 +129,36 @@ const updateHeatmap = (frequencyData: Uint8Array) => {
     for (let y = 0; y < heatmapHeight; y++) {
       heatmapBuffer[currentColumn][y] = scaledFilteredData[y];
     }
-
-    // 次の列に進む（列の循環）
-    currentColumn = (currentColumn + 1) % heatmapWidth;
+    
+    // 次の列に進む
+    currentColumn = (currentColumn + 1) % width;
+    
+    // 右端に達したらスクロールを開始
+    if (currentColumn === 0) {
+      // 右端に達したら左端に戻る代わりに、スクロールを開始
+      currentColumn = width - 1;
+      
+      // 全体を左にシフト
+      for (let x = 0; x < width - 1; x++) {
+        for (let y = 0; y < heatmapHeight; y++) {
+          heatmapBuffer[x][y] = heatmapBuffer[x + 1][y];
+        }
+      }
+      
+      // 右端の列をクリア
+      for (let y = 0; y < heatmapHeight; y++) {
+        heatmapBuffer[width - 1][y] = 0;
+      }
+    }
 
     // ピクセルごとの色を設定
     const imageData = ctx.createImageData(width, height);
 
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const columnIndex = (currentColumn + x) % heatmapWidth;
-        const value = heatmapBuffer[columnIndex][y];
+        // 現在のバッファから直接値を取得
+        const value = heatmapBuffer[x][y];
+        
         const [r, g, b, a] = getColor(value);
         const index = (y * width + x) * 4;
 
