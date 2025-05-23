@@ -37,13 +37,24 @@
             
             <div class="d-flex justify-space-between align-center mt-4">
               <v-btn
+                color="info"
+                prepend-icon="mdi-waveform"
+                @click="analyzeAudio"
+                :disabled="!audioUrl || isPlaying || isAnalyzing"
+                :loading="isAnalyzing"
+                class="mr-2"
+              >
+                分析
+              </v-btn>
+              
+              <v-btn
                 :color="isPlaying ? 'error' : 'primary'"
                 :prepend-icon="isPlaying ? 'mdi-stop' : 'mdi-play'"
                 @click="togglePlayback"
-                :disabled="!audioUrl"
+                :disabled="!audioUrl || !isAnalyzed"
                 :loading="isLoading"
               >
-                {{ isPlaying ? '停止' : '再生と分析' }}
+                {{ isPlaying ? '停止' : '再生' }}
               </v-btn>
               
               <v-btn
@@ -70,8 +81,15 @@ import { ref, onUnmounted, onMounted, watch } from 'vue';
 const emit = defineEmits<{
   (e: 'audio-loaded', audioBuffer: AudioBuffer): void;
   (e: 'analysis-requested', audioBuffer: AudioBuffer): void;
+  (e: 'playback-started', currentTime: number): void;
   (e: 'playback-ended'): void;
   (e: 'playback-stopped'): void;
+  (e: 'playback-time-updated', currentTime: number): void;
+}>();
+
+// 親コンポーネントからのプロップス
+const props = defineProps<{
+  analysisCompleted?: boolean;
 }>();
 
 // リアクティブな状態
@@ -83,6 +101,16 @@ const audioBuffer = ref<AudioBuffer | null>(null);
 const isAnalyzing = ref<boolean>(false);
 const isPlaying = ref<boolean>(false);
 const isLoading = ref<boolean>(false);
+const isAnalyzed = ref<boolean>(false);
+const analysisData = ref<{
+  pitchData: number[];
+  frequencyData: Uint8Array[];
+  timestamps: number[];
+}>({
+  pitchData: [],
+  frequencyData: [],
+  timestamps: []
+});
 
 // バリデーションルール
 const rules = {
@@ -134,6 +162,35 @@ const handleAudioLoaded = async () => {
   }
 };
 
+// 分析ボタンのクリックハンドラ
+const analyzeAudio = async () => {
+  if (!audioBuffer.value) return;
+  
+  isAnalyzing.value = true;
+  isAnalyzed.value = false; // 分析開始時にリセット
+  
+  try {
+    console.log('音声ファイルの分析を開始します');
+    
+    // 分析リクエストを発火
+    emit('analysis-requested', audioBuffer.value);
+    
+    // 注意: 分析完了フラグは親コンポーネントから通知される
+  } catch (error) {
+    console.error('音声分析に失敗しました:', error);
+    alert('音声分析に失敗しました。');
+  }
+};
+
+// 親コンポーネントからの分析完了通知を監視
+watch(() => props.analysisCompleted, (completed) => {
+  if (completed) {
+    console.log('分析が完了しました');
+    isAnalyzed.value = true;
+    isAnalyzing.value = false;
+  }
+});
+
 // 再生/停止のトグルハンドラ
 const togglePlayback = () => {
   if (isPlaying.value) {
@@ -143,9 +200,9 @@ const togglePlayback = () => {
   }
 };
 
-// 再生ボタンのクリックハンドラ - 再生と分析を同時に行う
+// 再生ボタンのクリックハンドラ - 分析済みデータを使用して再生
 const playAudio = async () => {
-  if (!audioBuffer.value || !audioPlayer.value) return;
+  if (!audioBuffer.value || !audioPlayer.value || !isAnalyzed.value) return;
   
   isLoading.value = true;
   
@@ -155,17 +212,15 @@ const playAudio = async () => {
     
     // 状態を更新
     isPlaying.value = true;
-    isAnalyzing.value = true;
     
     console.log('音声ファイルの再生を開始しました');
     
-    // 分析リクエストを発火
-    emit('analysis-requested', audioBuffer.value);
+    // 再生開始イベントを発火
+    emit('playback-started', audioPlayer.value.currentTime);
   } catch (error) {
-    console.error('音声再生・分析に失敗しました:', error);
-    alert('音声再生・分析に失敗しました。');
+    console.error('音声再生に失敗しました:', error);
+    alert('音声再生に失敗しました。');
     isPlaying.value = false;
-    isAnalyzing.value = false;
   } finally {
     isLoading.value = false;
   }
@@ -182,7 +237,6 @@ const stopAudio = () => {
     
     // 状態を更新
     isPlaying.value = false;
-    isAnalyzing.value = false;
     
     console.log('音声ファイルの再生を停止しました');
     
@@ -207,6 +261,14 @@ const clearAudio = () => {
   audioFile.value = null;
   audioUrl.value = null;
   audioBuffer.value = null;
+  isAnalyzed.value = false;
+  
+  // 分析データをクリア
+  analysisData.value = {
+    pitchData: [],
+    frequencyData: [],
+    timestamps: []
+  };
   
   if (audioPlayer.value) {
     audioPlayer.value.pause();
@@ -229,18 +291,28 @@ watch(audioPlayer, (newPlayer: HTMLAudioElement | null, oldPlayer: HTMLAudioElem
   // 古いプレーヤーからイベントリスナーを削除
   if (oldPlayer) {
     oldPlayer.removeEventListener('ended', handleAudioEnded);
+    oldPlayer.removeEventListener('timeupdate', handleTimeUpdate);
   }
   
   // 新しいプレーヤーにイベントリスナーを追加
   if (newPlayer) {
     newPlayer.addEventListener('ended', handleAudioEnded);
+    newPlayer.addEventListener('timeupdate', handleTimeUpdate);
   }
 });
+
+// 再生時間が更新されたときの処理
+const handleTimeUpdate = () => {
+  if (audioPlayer.value && isPlaying.value) {
+    emit('playback-time-updated', audioPlayer.value.currentTime);
+  }
+};
 
 // コンポーネントがマウントされたときのイベントリスナー設定
 onMounted(() => {
   if (audioPlayer.value) {
     audioPlayer.value.addEventListener('ended', handleAudioEnded);
+    audioPlayer.value.addEventListener('timeupdate', handleTimeUpdate);
   }
 });
 
@@ -256,6 +328,7 @@ onUnmounted(() => {
   
   if (audioPlayer.value) {
     audioPlayer.value.removeEventListener('ended', handleAudioEnded);
+    audioPlayer.value.removeEventListener('timeupdate', handleTimeUpdate);
   }
 });
 </script>

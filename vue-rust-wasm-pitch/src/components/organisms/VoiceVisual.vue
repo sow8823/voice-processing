@@ -47,8 +47,11 @@
         <AudioFileUploader
           @audio-loaded="handleAudioFileLoaded"
           @analysis-requested="analyzeAudioFile"
+          @playback-started="handlePlaybackStarted"
+          @playback-time-updated="handlePlaybackTimeUpdated"
           @playback-ended="handlePlaybackEnded"
           @playback-stopped="handlePlaybackStopped"
+          :analysis-completed="analysisCompleted"
         />
       </v-window-item>
     </v-window>
@@ -119,6 +122,21 @@ const isLoading = ref<boolean>(false);
 const animationFrameId = ref<number | null>(null);
 const fileAudioBuffer = ref<AudioBuffer | null>(null);
 const heatMapCanvasRef = ref<InstanceType<typeof HeatMapCanvas> | null>(null);
+const analysisCompleted = ref<boolean>(false);
+
+// 分析データを保存するための状態
+const analysisData = ref<{
+  pitchData: number[];
+  frequencyData: Uint8Array[];
+  timestamps: number[];
+}>({
+  pitchData: [],
+  frequencyData: [],
+  timestamps: []
+});
+
+// 現在の再生位置
+const currentPlaybackTime = ref<number>(0);
 
 // タブ切り替え時の処理
 watch(activeTab, (newTab, oldTab) => {
@@ -291,11 +309,16 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
     numberOfChannels: audioBuffer.numberOfChannels
   });
   
+  // 分析完了フラグをリセット
+  analysisCompleted.value = false;
+  
   try {
-    // ヒートマップをリセット
-    if (heatMapCanvasRef.value) {
-      heatMapCanvasRef.value.resetHeatmap();
-    }
+    // 分析データをリセット
+    analysisData.value = {
+      pitchData: [],
+      frequencyData: [],
+      timestamps: []
+    };
     
     // ピッチ検出サービスを初期化
     await pitchDetectionService.initialize();
@@ -304,32 +327,14 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
     // バッファサイズを設定
     const bufferSize = 2048;
     
-    // 既存のアニメーションフレームをクリア
-    if (animationFrameId.value !== null) {
-      cancelAnimationFrame(animationFrameId.value);
-      animationFrameId.value = null;
-    }
-    
-    // AudioServiceにファイルバッファを設定
-    try {
-      audioService.setAudioFileBuffer(audioBuffer);
-      console.log('AudioServiceにファイルバッファを設定しました');
-    } catch (error) {
-      console.error('ファイルバッファの設定に失敗しました:', error);
-      throw error;
-    }
+    // サンプリングレートを取得
+    const sampleRate = audioBuffer.sampleRate;
+    console.log(`サンプリングレート: ${sampleRate}Hz`);
     
     // FFTサイズを設定
-    audioService.setFFTSize(bufferSize);
-    
-    // 周波数データ用の配列を初期化
-    const frequencyBinCount = audioService.getFrequencyBinCount();
+    const fftSize = bufferSize * 2;
+    const frequencyBinCount = fftSize / 2;
     console.log(`周波数ビン数: ${frequencyBinCount}`);
-    frequencyData.value = new Uint8Array(frequencyBinCount);
-    
-    // サンプリングレートを取得
-    const sampleRate = audioService.getSampleRate();
-    console.log(`サンプリングレート: ${sampleRate}Hz`);
     
     // 閾値の設定
     const powerThreshold = 0.001;
@@ -338,57 +343,109 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
     // 分析用の一時バッファ
     const tempBuffer = new Float32Array(bufferSize);
     
-    // 音声ファイルの再生を開始
     try {
-      audioService.startAudioFile();
-      console.log('音声ファイルの再生を開始しました');
-    } catch (error) {
-      console.error('音声ファイルの再生開始に失敗しました:', error);
-      throw error;
-    }
-    
-    // 分析関数
-    const analyzeFrame = () => {
-      try {
-        // 時間領域のデータを取得
-        audioService.getTimeDomainData(tempBuffer);
+      // 音声ファイルの長さを取得
+      const duration = audioBuffer.duration;
+      
+      // 240frame/sの粒度で分析
+      const frameInterval = 1 / 240; // 秒単位のフレーム間隔
+      const totalFrames = Math.ceil(duration / frameInterval);
+      
+      console.log(`分析フレーム数: ${totalFrames} (${frameInterval}秒間隔)`);
+      
+      // 進捗表示用
+      const progressStep = Math.max(1, Math.floor(totalFrames / 100));
+      
+      // オフライン分析用のコンテキスト
+      const offlineContext = new OfflineAudioContext(1, bufferSize, sampleRate);
+      const offlineAnalyser = offlineContext.createAnalyser();
+      offlineAnalyser.fftSize = fftSize;
+      
+      // 各フレームを分析
+      for (let frame = 0; frame < totalFrames; frame++) {
+        const currentTime = frame * frameInterval;
         
-        // 周波数領域のデータを取得
-        audioService.getFrequencyData(frequencyData.value);
+        // 現在の時間位置のオーディオデータを取得
+        const startSample = Math.floor(currentTime * sampleRate);
         
-        // Vueのリアクティビティを維持するために新しい参照を作成
-        frequencyData.value = new Uint8Array([...frequencyData.value]);
+        // バッファをクリア
+        tempBuffer.fill(0);
+        
+        // オーディオデータをコピー（チャンネル0のみ使用）
+        for (let i = 0; i < bufferSize; i++) {
+          const sampleIndex = startSample + i;
+          if (sampleIndex < audioBuffer.length) {
+            tempBuffer[i] = audioBuffer.getChannelData(0)[sampleIndex];
+          }
+        }
+        
+        // 周波数データを取得
+        const currentFrequencyData = new Uint8Array(frequencyBinCount);
+        
+        // 一時的なバッファを作成
+        const tempAudioBuffer = offlineContext.createBuffer(1, bufferSize, sampleRate);
+        const tempChannel = tempAudioBuffer.getChannelData(0);
+        
+        // データをコピー
+        for (let i = 0; i < bufferSize; i++) {
+          tempChannel[i] = tempBuffer[i];
+        }
+        
+        // FFT分析を行う
+        const offlineSource = offlineContext.createBufferSource();
+        offlineSource.buffer = tempAudioBuffer;
+        offlineSource.connect(offlineAnalyser);
+        
+        // 周波数データを取得（オフライン分析）
+        offlineSource.start();
+        offlineAnalyser.getByteFrequencyData(currentFrequencyData);
         
         // ピッチを検出
-        currentPitch.value = pitchDetectionService.detectPitch(
+        const pitch = pitchDetectionService.detectPitch(
           tempBuffer,
           sampleRate,
           { powerThreshold, clarityThreshold }
         );
         
-        // 次のフレームをスケジュール
-        animationFrameId.value = requestAnimationFrame(analyzeFrame);
-      } catch (frameError) {
-        console.error('フレーム分析中にエラーが発生しました:', frameError);
-        if (animationFrameId.value !== null) {
-          cancelAnimationFrame(animationFrameId.value);
-          animationFrameId.value = null;
+        // 分析データを保存
+        analysisData.value.timestamps.push(currentTime);
+        analysisData.value.pitchData.push(pitch);
+        analysisData.value.frequencyData.push(new Uint8Array([...currentFrequencyData]));
+        
+        // 進捗表示
+        if (frame % progressStep === 0) {
+          console.log(`分析進捗: ${Math.round((frame / totalFrames) * 100)}%`);
         }
       }
-    };
-    
-    // 分析を開始
-    console.log('分析を開始します');
-    analyzeFrame();
+      
+      console.log('分析が完了しました', {
+        frames: analysisData.value.timestamps.length,
+        duration: analysisData.value.timestamps[analysisData.value.timestamps.length - 1],
+        frequency_data: analysisData.value.frequencyData,
+        pitch_data: analysisData.value.pitchData,
+        timestamps: analysisData.value.timestamps
+      });
+      
+      // 分析完了後、表示はリセットしておく
+      currentPitch.value = 0;
+      frequencyData.value = new Uint8Array(frequencyBinCount);
+      
+      // ヒートマップをリセット
+      if (heatMapCanvasRef.value) {
+        heatMapCanvasRef.value.resetHeatmap();
+      }
+      
+      // 分析完了フラグを設定
+      analysisCompleted.value = true;
+      
+    } catch (error) {
+      console.error('音声ファイルの分析に失敗しました:', error);
+      throw error;
+    }
   } catch (error) {
     console.error('音声ファイルの分析に失敗しました:', error);
     alert('音声ファイルの分析に失敗しました。');
-    
-    // エラーが発生した場合、アニメーションフレームをクリア
-    if (animationFrameId.value !== null) {
-      cancelAnimationFrame(animationFrameId.value);
-      animationFrameId.value = null;
-    }
+    analysisCompleted.value = false;
   }
 };
 
@@ -406,6 +463,7 @@ const stopFileAnalysis = () => {
   // ピッチと周波数データをリセット
   currentPitch.value = 0;
   frequencyData.value = new Uint8Array(frequencyData.value.length);
+  currentPlaybackTime.value = 0;
   
   // リソースを解放
   audioService.dispose();
@@ -413,16 +471,77 @@ const stopFileAnalysis = () => {
   console.log('分析データをリセットしました');
 };
 
+// 再生開始時の処理
+const handlePlaybackStarted = (currentTime: number) => {
+  console.log('再生が開始されました', { currentTime });
+  currentPlaybackTime.value = currentTime;
+  
+  // 初期表示用にデータを設定
+  updateDisplayWithCurrentTime(currentTime);
+  
+  // ヒートマップをリセット
+  if (heatMapCanvasRef.value) {
+    heatMapCanvasRef.value.resetHeatmap();
+  }
+};
+
+// 再生時間更新時の処理
+const handlePlaybackTimeUpdated = (currentTime: number) => {
+  currentPlaybackTime.value = currentTime;
+  
+  // 現在の再生位置に合わせて表示を更新
+  updateDisplayWithCurrentTime(currentTime);
+};
+
 // 再生終了時の処理
 const handlePlaybackEnded = () => {
   console.log('再生が終了しました');
-  stopFileAnalysis();
+  currentPlaybackTime.value = 0;
+  
+  // 表示をリセット
+  currentPitch.value = 0;
+  frequencyData.value = new Uint8Array(frequencyData.value.length);
 };
 
 // 再生停止時の処理
 const handlePlaybackStopped = () => {
   console.log('再生が停止されました');
-  stopFileAnalysis();
+  currentPlaybackTime.value = 0;
+  
+  // 表示をリセット
+  currentPitch.value = 0;
+  frequencyData.value = new Uint8Array(frequencyData.value.length);
+};
+
+// タブ切り替えや新しいファイルがロードされたときに分析完了フラグをリセット
+watch([activeTab, fileAudioBuffer], () => {
+  analysisCompleted.value = false;
+});
+
+// 現在の再生時間に合わせて表示を更新する関数
+const updateDisplayWithCurrentTime = (currentTime: number) => {
+  if (analysisData.value.timestamps.length === 0) return;
+  
+  // 現在の時間に最も近いフレームのインデックスを検索
+  let closestIndex = 0;
+  let minTimeDiff = Number.MAX_VALUE;
+  
+  for (let i = 0; i < analysisData.value.timestamps.length; i++) {
+    const timeDiff = Math.abs(analysisData.value.timestamps[i] - currentTime);
+    if (timeDiff < minTimeDiff) {
+      minTimeDiff = timeDiff;
+      closestIndex = i;
+    }
+  }
+  
+  // 見つかったフレームのデータを表示
+  if (closestIndex >= 0 && closestIndex < analysisData.value.pitchData.length) {
+    currentPitch.value = analysisData.value.pitchData[closestIndex];
+  }
+  
+  if (closestIndex >= 0 && closestIndex < analysisData.value.frequencyData.length) {
+    frequencyData.value = analysisData.value.frequencyData[closestIndex];
+  }
 };
 </script>
 
