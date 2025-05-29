@@ -35,6 +35,35 @@
               @loadedmetadata="handleAudioLoaded"
             ></audio>
             
+            <div v-if="isAnalyzed && audioBuffer" class="time-slider-container mt-3">
+              <div class="d-flex justify-space-between mb-1">
+                <span class="text-caption">{{ formatTime(0) }}</span>
+                <span class="text-caption">{{ formatTime(audioBuffer.duration) }}</span>
+              </div>
+              <v-slider
+                v-model="sliderPosition"
+                :min="0"
+                :max="Math.ceil(audioBuffer.duration * 120)"
+                :step="1"
+                hide-details
+                density="compact"
+                color="primary"
+                track-color="grey-darken-1"
+                @update:model-value="handleSliderChange"
+                :disabled="!isAnalyzed"
+              >
+                <template v-slot:prepend>
+                  <v-icon size="small">mdi-clock-outline</v-icon>
+                </template>
+                <template v-slot:append>
+                  <span class="text-caption">{{ formatTime(sliderPosition / 120) }}</span>
+                </template>
+              </v-slider>
+              <div class="text-caption text-center mt-1">
+                1秒 = 120分割 (8.33ms/分割)
+              </div>
+            </div>
+            
             <div class="d-flex justify-space-between align-center mt-4">
               <v-btn
                 color="info"
@@ -85,6 +114,7 @@ const emit = defineEmits<{
   (e: 'playback-ended'): void;
   (e: 'playback-stopped'): void;
   (e: 'playback-time-updated', currentTime: number): void;
+  (e: 'seek-to-time', seekTime: number): void;
 }>();
 
 // 親コンポーネントからのプロップス
@@ -102,6 +132,8 @@ const isAnalyzing = ref<boolean>(false);
 const isPlaying = ref<boolean>(false);
 const isLoading = ref<boolean>(false);
 const isAnalyzed = ref<boolean>(false);
+const sliderPosition = ref<number>(0); // スライダーの位置（120分割/秒）
+const animationFrameId = ref<number | null>(null); // アニメーションフレームID
 const analysisData = ref<{
   pitchData: number[];
   frequencyData: Uint8Array[];
@@ -200,6 +232,31 @@ const togglePlayback = () => {
   }
 };
 
+// スライダーを滑らかに更新するアニメーション関数
+const updateSliderAnimation = () => {
+  if (!audioPlayer.value || !isPlaying.value) {
+    if (animationFrameId.value !== null) {
+      cancelAnimationFrame(animationFrameId.value);
+      animationFrameId.value = null;
+    }
+    return;
+  }
+  
+  const currentTime = audioPlayer.value.currentTime;
+  
+  // スライダーの位置を更新（1秒 = 120分割）
+  const newPosition = Math.round(currentTime * 120);
+  if (sliderPosition.value !== newPosition) {
+    sliderPosition.value = newPosition;
+    
+    // 表示を更新
+    emit('playback-time-updated', currentTime);
+  }
+  
+  // 次のフレームをリクエスト
+  animationFrameId.value = requestAnimationFrame(updateSliderAnimation);
+};
+
 // 再生ボタンのクリックハンドラ - 分析済みデータを使用して再生
 const playAudio = async () => {
   if (!audioBuffer.value || !audioPlayer.value || !isAnalyzed.value) return;
@@ -217,6 +274,16 @@ const playAudio = async () => {
     
     // 再生開始イベントを発火
     emit('playback-started', audioPlayer.value.currentTime);
+    
+    // 再生開始時に現在位置のデータを表示するために、playback-time-updatedイベントも発火
+    const currentTime = audioPlayer.value.currentTime;
+    sliderPosition.value = Math.round(currentTime * 120);
+    emit('playback-time-updated', currentTime);
+    
+    // アニメーションを開始
+    if (animationFrameId.value === null) {
+      animationFrameId.value = requestAnimationFrame(updateSliderAnimation);
+    }
   } catch (error) {
     console.error('音声再生に失敗しました:', error);
     alert('音声再生に失敗しました。');
@@ -237,6 +304,12 @@ const stopAudio = () => {
     
     // 状態を更新
     isPlaying.value = false;
+    
+    // アニメーションを停止
+    if (animationFrameId.value !== null) {
+      cancelAnimationFrame(animationFrameId.value);
+      animationFrameId.value = null;
+    }
     
     console.log('音声ファイルの再生を停止しました');
     
@@ -262,6 +335,7 @@ const clearAudio = () => {
   audioUrl.value = null;
   audioBuffer.value = null;
   isAnalyzed.value = false;
+  sliderPosition.value = 0;
   
   // 分析データをクリア
   analysisData.value = {
@@ -283,6 +357,13 @@ const handleAudioEnded = () => {
   console.log('音声再生が終了しました');
   isPlaying.value = false;
   isAnalyzing.value = false;
+  
+  // アニメーションを停止
+  if (animationFrameId.value !== null) {
+    cancelAnimationFrame(animationFrameId.value);
+    animationFrameId.value = null;
+  }
+  
   emit('playback-ended');
 };
 
@@ -302,10 +383,34 @@ watch(audioPlayer, (newPlayer: HTMLAudioElement | null, oldPlayer: HTMLAudioElem
 });
 
 // 再生時間が更新されたときの処理
+// 注: requestAnimationFrameを使用するため、この関数は主にデバッグ用になります
 const handleTimeUpdate = () => {
-  if (audioPlayer.value && isPlaying.value) {
-    emit('playback-time-updated', audioPlayer.value.currentTime);
-  }
+  // アニメーションフレームで処理するため、ここでは何もしない
+};
+
+// スライダーの値が変更されたときの処理
+const handleSliderChange = (value: number) => {
+  if (!audioPlayer.value || !audioBuffer.value) return;
+  
+  // スライダーの値から時間を計算（1分割 = 1/120秒）
+  const seekTime = value / 120;
+  
+  // 音声の再生位置を設定
+  audioPlayer.value.currentTime = seekTime;
+  
+  // スライダーの位置に基づいて表示を更新するために親コンポーネントに通知
+  // 再生中でなくても表示を更新するために、playback-time-updatedイベントも発火
+  emit('seek-to-time', seekTime);
+  emit('playback-time-updated', seekTime);
+};
+
+// 時間を「分:秒.ミリ秒」形式にフォーマットする関数
+const formatTime = (seconds: number): string => {
+  const min = Math.floor(seconds / 60);
+  const sec = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  
+  return `${min}:${sec.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
 };
 
 // コンポーネントがマウントされたときのイベントリスナー設定
@@ -330,6 +435,12 @@ onUnmounted(() => {
     audioPlayer.value.removeEventListener('ended', handleAudioEnded);
     audioPlayer.value.removeEventListener('timeupdate', handleTimeUpdate);
   }
+  
+  // アニメーションを停止
+  if (animationFrameId.value !== null) {
+    cancelAnimationFrame(animationFrameId.value);
+    animationFrameId.value = null;
+  }
 });
 </script>
 
@@ -345,5 +456,9 @@ onUnmounted(() => {
 audio {
   width: 100%;
   margin: 8px 0;
+}
+
+.time-slider-container {
+  padding: 0 8px;
 }
 </style>

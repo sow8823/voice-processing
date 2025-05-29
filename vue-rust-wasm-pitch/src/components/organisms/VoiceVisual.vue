@@ -51,6 +51,7 @@
           @playback-time-updated="handlePlaybackTimeUpdated"
           @playback-ended="handlePlaybackEnded"
           @playback-stopped="handlePlaybackStopped"
+          @seek-to-time="handleSeekToTime"
           :analysis-completed="analysisCompleted"
         />
       </v-window-item>
@@ -485,12 +486,23 @@ const handlePlaybackStarted = (currentTime: number) => {
   }
 };
 
-// 再生時間更新時の処理
+// 再生時間更新時の処理（スライダーからの更新）
 const handlePlaybackTimeUpdated = (currentTime: number) => {
   currentPlaybackTime.value = currentTime;
   
-  // 現在の再生位置に合わせて表示を更新
+  // スライダーの位置に合わせて表示を更新
   updateDisplayWithCurrentTime(currentTime);
+  
+  console.log(`スライダー位置更新: ${currentTime}秒 (${Math.round(currentTime * 120)}分割)`);
+};
+
+// スライダーでシーク時の処理
+const handleSeekToTime = (seekTime: number) => {
+  console.log(`スライダーシーク: ${seekTime}秒 (${Math.round(seekTime * 120)}分割)`);
+  currentPlaybackTime.value = seekTime;
+  
+  // シーク位置に合わせて表示を更新
+  // updateDisplayWithCurrentTimeはhandlePlaybackTimeUpdatedで呼び出されるため、ここでは不要
 };
 
 // 再生終了時の処理
