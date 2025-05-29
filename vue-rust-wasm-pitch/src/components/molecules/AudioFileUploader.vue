@@ -29,9 +29,9 @@
             
             <audio
               ref="audioPlayer"
-              controls
               class="w-100"
               :src="audioUrl"
+              :disabled="true"
               @loadedmetadata="handleAudioLoaded"
             ></audio>
             
