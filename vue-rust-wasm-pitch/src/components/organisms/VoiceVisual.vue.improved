@@ -108,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted, watch, onMounted } from "vue";
+import { ref, onUnmounted, watch } from "vue";
 import PitchCanvas from "../atoms/PitchCanvas.vue";
 import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
 import { audioService, pitchDetectionService } from "../../services";
@@ -123,17 +123,6 @@ const animationFrameId = ref<number | null>(null);
 const fileAudioBuffer = ref<AudioBuffer | null>(null);
 const heatMapCanvasRef = ref<InstanceType<typeof HeatMapCanvas> | null>(null);
 const analysisCompleted = ref<boolean>(false);
-const analysisProgress = ref<number>(0);
-
-// ワーカーの参照
-const searchWorker = ref<Worker | null>(null);
-const analysisWorker = ref<Worker | null>(null);
-// リクエスト管理用のIDとコールバックのマップ
-const pendingRequests = ref<Map<number, (frameIndex: number, frameData: any) => void>>(new Map());
-const pendingAnalysisRequests = ref<Map<number, (error: Error | null, result: any) => void>>(new Map());
-// リクエストIDカウンター
-let requestIdCounter = 0;
-let analysisRequestIdCounter = 0;
 
 // 分析データを保存するための状態
 const analysisData = ref<{
@@ -283,84 +272,6 @@ const stopAudio = () => {
 };
 
 
-// コンポーネントがマウント時にワーカーを初期化
-onMounted(() => {
-  // 検索ワーカーを作成
-  try {
-    searchWorker.value = new Worker(new URL('../../workers/search-worker.js', import.meta.url));
-    
-    // ワーカーからのメッセージを処理
-    searchWorker.value.onmessage = (e) => {
-      const { action, requestId, frameIndex, frameData } = e.data;
-      
-      if (action === 'initialized') {
-        console.log('検索ワーカーが初期化されました');
-      } else if (action === 'frameFound') {
-        // 対応するリクエストのコールバックを呼び出す
-        const callback = pendingRequests.value.get(requestId);
-        if (callback) {
-          callback(frameIndex, frameData);
-          pendingRequests.value.delete(requestId);
-        }
-      }
-    };
-    
-    console.log('検索ワーカーを作成しました');
-  } catch (error) {
-    console.error('検索ワーカーの作成に失敗しました:', error);
-  }
-  
-  // 分析ワーカーを作成
-  try {
-    analysisWorker.value = new Worker(new URL('../../workers/analysis-worker.js', import.meta.url));
-    
-    // ワーカーからのメッセージを処理
-    analysisWorker.value.onmessage = (e) => {
-      const { action, requestId, progress, result, error } = e.data;
-      
-      if (action === 'analysisProgress') {
-        // 進捗を更新
-        analysisProgress.value = progress * 100;
-      } else if (action === 'analysisComplete') {
-        // 分析結果を保存
-        analysisData.value = result;
-        analysisCompleted.value = true;
-        analysisProgress.value = 100;
-        
-        // 検索ワーカーに分析データを送信
-        if (searchWorker.value) {
-          searchWorker.value.postMessage({
-            action: 'init',
-            data: {
-              analysisData: analysisData.value
-            }
-          });
-        }
-        
-        // コールバックを呼び出す
-        const callback = pendingAnalysisRequests.value.get(requestId);
-        if (callback) {
-          callback(null, result);
-          pendingAnalysisRequests.value.delete(requestId);
-        }
-      } else if (action === 'analysisError') {
-        console.error('分析エラー:', error);
-        
-        // コールバックを呼び出す
-        const callback = pendingAnalysisRequests.value.get(requestId);
-        if (callback) {
-          callback(new Error(error), null);
-          pendingAnalysisRequests.value.delete(requestId);
-        }
-      }
-    };
-    
-    console.log('分析ワーカーを作成しました');
-  } catch (error) {
-    console.error('分析ワーカーの作成に失敗しました:', error);
-  }
-});
-
 // コンポーネントがアンマウントされたときにリソースを解放
 onUnmounted(() => {
   // アニメーションフレームをキャンセル
@@ -372,17 +283,6 @@ onUnmounted(() => {
   // リソースを解放
   audioService.dispose();
   pitchDetectionService.dispose();
-  
-  // ワーカーを終了
-  if (searchWorker.value) {
-    searchWorker.value.terminate();
-    searchWorker.value = null;
-  }
-  
-  if (analysisWorker.value) {
-    analysisWorker.value.terminate();
-    analysisWorker.value = null;
-  }
   
   // 処理中フラグをリセット
   isProcessing.value = false;
@@ -411,7 +311,6 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
   
   // 分析完了フラグをリセット
   analysisCompleted.value = false;
-  analysisProgress.value = 0;
   
   try {
     // 分析データをリセット
@@ -421,178 +320,127 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
       timestamps: []
     };
     
-    // 分析ワーカーが利用可能な場合はワーカーを使用
-    if (analysisWorker.value) {
-      // オーディオデータを取得
-      const audioData = audioBuffer.getChannelData(0);
+    // ピッチ検出サービスを初期化
+    await pitchDetectionService.initialize();
+    console.log('ピッチ検出サービスを初期化しました');
+    
+    // バッファサイズを設定
+    const bufferSize = 2048;
+    
+    // サンプリングレートを取得
+    const sampleRate = audioBuffer.sampleRate;
+    console.log(`サンプリングレート: ${sampleRate}Hz`);
+    
+    // FFTサイズを設定
+    const fftSize = bufferSize * 2;
+    const frequencyBinCount = fftSize / 2;
+    console.log(`周波数ビン数: ${frequencyBinCount}`);
+    
+    // 閾値の設定
+    const powerThreshold = 0.001;
+    const clarityThreshold = 0.7;
+    
+    // 分析用の一時バッファ
+    const tempBuffer = new Float32Array(bufferSize);
+    
+    try {
+      // 音声ファイルの長さを取得
+      const duration = audioBuffer.duration;
       
-      // リクエストIDを生成
-      const requestId = analysisRequestIdCounter++;
+      // 240frame/sの粒度で分析
+      const frameInterval = 1 / 240; // 秒単位のフレーム間隔
+      const totalFrames = Math.ceil(duration / frameInterval);
       
-      // 分析オプション
-      const options = {
-        powerThreshold: 0.001,
-        clarityThreshold: 0.7
-      };
+      console.log(`分析フレーム数: ${totalFrames} (${frameInterval}秒間隔)`);
       
-      // ワーカーに分析をリクエスト
-      analysisWorker.value.postMessage({
-        action: 'analyzeAudio',
-        data: {
-          audioData,
-          sampleRate: audioBuffer.sampleRate,
-          frameInterval: 1 / 240, // 240fps
-          options,
-          requestId
-        }
-      });
+      // 進捗表示用
+      const progressStep = Math.max(1, Math.floor(totalFrames / 100));
       
-      // Promiseを返す
-      return new Promise((resolve, reject) => {
-        pendingAnalysisRequests.value.set(requestId, (error, result) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve(result);
-          }
-        });
-      });
-    } else {
-      // ワーカーが利用できない場合はメインスレッドで分析
-      // ピッチ検出サービスを初期化
-      await pitchDetectionService.initialize();
-      console.log('ピッチ検出サービスを初期化しました');
+      // オフライン分析用のコンテキスト
+      const offlineContext = new OfflineAudioContext(1, bufferSize, sampleRate);
+      const offlineAnalyser = offlineContext.createAnalyser();
+      offlineAnalyser.fftSize = fftSize;
       
-      // バッファサイズを設定
-      const bufferSize = 2048;
-      
-      // サンプリングレートを取得
-      const sampleRate = audioBuffer.sampleRate;
-      console.log(`サンプリングレート: ${sampleRate}Hz`);
-      
-      // FFTサイズを設定
-      const fftSize = bufferSize * 2;
-      const frequencyBinCount = fftSize / 2;
-      console.log(`周波数ビン数: ${frequencyBinCount}`);
-      
-      // 閾値の設定
-      const powerThreshold = 0.001;
-      const clarityThreshold = 0.7;
-      
-      // 分析用の一時バッファ
-      const tempBuffer = new Float32Array(bufferSize);
-      
-      try {
-        // 音声ファイルの長さを取得
-        const duration = audioBuffer.duration;
+      // 各フレームを分析
+      for (let frame = 0; frame < totalFrames; frame++) {
+        const currentTime = frame * frameInterval;
         
-        // 240frame/sの粒度で分析
-        const frameInterval = 1 / 240; // 秒単位のフレーム間隔
-        const totalFrames = Math.ceil(duration / frameInterval);
+        // 現在の時間位置のオーディオデータを取得
+        const startSample = Math.floor(currentTime * sampleRate);
         
-        console.log(`分析フレーム数: ${totalFrames} (${frameInterval}秒間隔)`);
+        // バッファをクリア
+        tempBuffer.fill(0);
         
-        // 進捗表示用
-        const progressStep = Math.max(1, Math.floor(totalFrames / 100));
-        
-        // オフライン分析用のコンテキスト
-        const offlineContext = new OfflineAudioContext(1, bufferSize, sampleRate);
-        const offlineAnalyser = offlineContext.createAnalyser();
-        offlineAnalyser.fftSize = fftSize;
-        
-        // 各フレームを分析
-        for (let frame = 0; frame < totalFrames; frame++) {
-          const currentTime = frame * frameInterval;
-          
-          // 現在の時間位置のオーディオデータを取得
-          const startSample = Math.floor(currentTime * sampleRate);
-          
-          // バッファをクリア
-          tempBuffer.fill(0);
-          
-          // オーディオデータをコピー（チャンネル0のみ使用）
-          for (let i = 0; i < bufferSize; i++) {
-            const sampleIndex = startSample + i;
-            if (sampleIndex < audioBuffer.length) {
-              tempBuffer[i] = audioBuffer.getChannelData(0)[sampleIndex];
-            }
-          }
-          
-          // 周波数データを取得
-          const currentFrequencyData = new Uint8Array(frequencyBinCount);
-          
-          // 一時的なバッファを作成
-          const tempAudioBuffer = offlineContext.createBuffer(1, bufferSize, sampleRate);
-          const tempChannel = tempAudioBuffer.getChannelData(0);
-          
-          // データをコピー
-          for (let i = 0; i < bufferSize; i++) {
-            tempChannel[i] = tempBuffer[i];
-          }
-          
-          // FFT分析を行う
-          const offlineSource = offlineContext.createBufferSource();
-          offlineSource.buffer = tempAudioBuffer;
-          offlineSource.connect(offlineAnalyser);
-          
-          // 周波数データを取得（オフライン分析）
-          offlineSource.start();
-          offlineAnalyser.getByteFrequencyData(currentFrequencyData);
-          
-          // ピッチを検出
-          const pitch = pitchDetectionService.detectPitch(
-            tempBuffer,
-            sampleRate,
-            { powerThreshold, clarityThreshold }
-          );
-          
-          // 分析データを保存
-          analysisData.value.timestamps.push(currentTime);
-          analysisData.value.pitchData.push(pitch);
-          analysisData.value.frequencyData.push(new Uint8Array([...currentFrequencyData]));
-          
-          // 進捗表示
-          if (frame % progressStep === 0) {
-            analysisProgress.value = (frame / totalFrames) * 100;
-            console.log(`分析進捗: ${Math.round(analysisProgress.value)}%`);
+        // オーディオデータをコピー（チャンネル0のみ使用）
+        for (let i = 0; i < bufferSize; i++) {
+          const sampleIndex = startSample + i;
+          if (sampleIndex < audioBuffer.length) {
+            tempBuffer[i] = audioBuffer.getChannelData(0)[sampleIndex];
           }
         }
         
-        console.log('分析が完了しました', {
-          frames: analysisData.value.timestamps.length,
-          duration: analysisData.value.timestamps[analysisData.value.timestamps.length - 1],
-          frequency_data: analysisData.value.frequencyData,
-          pitch_data: analysisData.value.pitchData,
-          timestamps: analysisData.value.timestamps
-        });
+        // 周波数データを取得
+        const currentFrequencyData = new Uint8Array(frequencyBinCount);
         
-        // 分析完了後、表示はリセットしておく
-        currentPitch.value = 0;
-        frequencyData.value = new Uint8Array(frequencyBinCount);
+        // 一時的なバッファを作成
+        const tempAudioBuffer = offlineContext.createBuffer(1, bufferSize, sampleRate);
+        const tempChannel = tempAudioBuffer.getChannelData(0);
         
-        // ヒートマップをリセット
-        if (heatMapCanvasRef.value) {
-          heatMapCanvasRef.value.resetHeatmap();
+        // データをコピー
+        for (let i = 0; i < bufferSize; i++) {
+          tempChannel[i] = tempBuffer[i];
         }
         
-        // 分析完了フラグを設定
-        analysisCompleted.value = true;
-        analysisProgress.value = 100;
+        // FFT分析を行う
+        const offlineSource = offlineContext.createBufferSource();
+        offlineSource.buffer = tempAudioBuffer;
+        offlineSource.connect(offlineAnalyser);
         
-        // 検索ワーカーに分析データを送信
-        if (searchWorker.value) {
-          searchWorker.value.postMessage({
-            action: 'init',
-            data: {
-              analysisData: analysisData.value
-            }
-          });
+        // 周波数データを取得（オフライン分析）
+        offlineSource.start();
+        offlineAnalyser.getByteFrequencyData(currentFrequencyData);
+        
+        // ピッチを検出
+        const pitch = pitchDetectionService.detectPitch(
+          tempBuffer,
+          sampleRate,
+          { powerThreshold, clarityThreshold }
+        );
+        
+        // 分析データを保存
+        analysisData.value.timestamps.push(currentTime);
+        analysisData.value.pitchData.push(pitch);
+        analysisData.value.frequencyData.push(new Uint8Array([...currentFrequencyData]));
+        
+        // 進捗表示
+        if (frame % progressStep === 0) {
+          console.log(`分析進捗: ${Math.round((frame / totalFrames) * 100)}%`);
         }
-        
-      } catch (error) {
-        console.error('音声ファイルの分析に失敗しました:', error);
-        throw error;
       }
+      
+      console.log('分析が完了しました', {
+        frames: analysisData.value.timestamps.length,
+        duration: analysisData.value.timestamps[analysisData.value.timestamps.length - 1],
+        frequency_data: analysisData.value.frequencyData,
+        pitch_data: analysisData.value.pitchData,
+        timestamps: analysisData.value.timestamps
+      });
+      
+      // 分析完了後、表示はリセットしておく
+      currentPitch.value = 0;
+      frequencyData.value = new Uint8Array(frequencyBinCount);
+      
+      // ヒートマップをリセット
+      if (heatMapCanvasRef.value) {
+        heatMapCanvasRef.value.resetHeatmap();
+      }
+      
+      // 分析完了フラグを設定
+      analysisCompleted.value = true;
+      
+    } catch (error) {
+      console.error('音声ファイルの分析に失敗しました:', error);
+      throw error;
     }
   } catch (error) {
     console.error('音声ファイルの分析に失敗しました:', error);
@@ -674,43 +522,20 @@ watch([activeTab, fileAudioBuffer], () => {
 const updateDisplayWithCurrentTime = (currentTime: number) => {
   if (analysisData.value.timestamps.length === 0) return;
   
-  // 検索ワーカーが利用可能な場合はワーカーを使用
-  if (searchWorker.value && analysisCompleted.value) {
-    // リクエストIDを生成
-    const requestId = requestIdCounter++;
-    
-    // ワーカーにフレーム検索をリクエスト
-    searchWorker.value.postMessage({
-      action: 'findFrame',
-      data: {
-        currentTime,
-        requestId
-      }
-    });
-    
-    // コールバックを登録
-    pendingRequests.value.set(requestId, (frameIndex, frameData) => {
-      // 見つかったフレームのデータを表示
-      currentPitch.value = frameData.pitch;
-      frequencyData.value = frameData.frequencyData;
-    });
-  } else {
-    // ワーカーが利用できない場合はメインスレッドで検索
-    const targetIndex = binarySearchClosestTime(analysisData.value.timestamps, currentTime);
-    
-    // 見つかったフレームのデータを表示
-    if (targetIndex >= 0 && targetIndex < analysisData.value.pitchData.length) {
-      currentPitch.value = analysisData.value.pitchData[targetIndex];
-    }
-    
-    if (targetIndex >= 0 && targetIndex < analysisData.value.frequencyData.length) {
-      frequencyData.value = analysisData.value.frequencyData[targetIndex];
-    }
+  // 二分探索で現在の時間に最も近いフレームのインデックスを効率的に検索
+  const targetIndex = binarySearchClosestTime(analysisData.value.timestamps, currentTime);
+  
+  // 見つかったフレームのデータを表示
+  if (targetIndex >= 0 && targetIndex < analysisData.value.pitchData.length) {
+    currentPitch.value = analysisData.value.pitchData[targetIndex];
+  }
+  
+  if (targetIndex >= 0 && targetIndex < analysisData.value.frequencyData.length) {
+    frequencyData.value = analysisData.value.frequencyData[targetIndex];
   }
 };
 
 // 二分探索で最も近い時間のインデックスを検索する関数（高速化のため）
-// ワーカーが利用できない場合のフォールバック用
 const binarySearchClosestTime = (timestamps: number[], targetTime: number): number => {
   if (timestamps.length === 0) return -1;
   

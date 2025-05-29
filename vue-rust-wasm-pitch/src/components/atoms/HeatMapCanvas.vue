@@ -34,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps, defineExpose, watchEffect, computed, watch, onMounted } from "vue";
+import { ref, defineProps, defineExpose, watchEffect, computed, watch, onMounted, onUnmounted } from "vue";
 import { useTheme } from "vuetify";
 import { frequencyAnalysisService } from "../../services";
 
@@ -46,6 +46,13 @@ const theme = useTheme();
 
 const heatmapWidth = 800;
 const heatmapHeight = 300;
+
+// 描画ワーカーの参照
+const renderWorker = ref<Worker | null>(null);
+// リクエスト管理用のIDとコールバックのマップ
+const pendingRenderRequests = ref<Map<number, (pixelData: Uint8ClampedArray) => void>>(new Map());
+// リクエストIDカウンター
+let renderRequestIdCounter = 0;
 
 // ヒートマップ用データを動的に管理（x軸が時間、y軸が周波数）
 const heatmapBuffer: Uint8Array[] = Array.from({ length: heatmapWidth }, () => new Uint8Array(heatmapHeight));
@@ -102,54 +109,82 @@ const getColor = (value: number): [number, number, number, number] => {
 
 const updateHeatmap = (frequencyData: Uint8Array) => {
   const ctx = heatmapCanvas.value?.getContext("2d");
-  if (ctx) {
-    const width = ctx.canvas.width;
-    const height = ctx.canvas.height;
+  if (!ctx) return;
+  
+  const width = ctx.canvas.width;
+  const height = ctx.canvas.height;
+  
+  const maxFrequency = 10000;
+  const nyquist = sampleRate / 2;
+  const dataLength = Math.floor((maxFrequency / nyquist) * frequencyData.length);
+  const filteredData = frequencyData.slice(0, dataLength);
+
+  // filteredData をヒートマップの高さに合わせてスケール（y軸が周波数になるため）
+  const scaledFilteredData = frequencyAnalysisService.scaleFrequencyData(
+    filteredData,
+    heatmapHeight,
+    maxFrequency,
+    sampleRate
+  );
+
+  // 現在の列にデータを追加
+  for (let y = 0; y < heatmapHeight; y++) {
+    heatmapBuffer[currentColumn][y] = scaledFilteredData[y];
+  }
+  
+  // 次の列に進む
+  currentColumn = (currentColumn + 1) % width;
+  
+  // 右端に達したらスクロールを開始
+  if (currentColumn === 0) {
+    // 右端に達したら左端に戻る代わりに、スクロールを開始
+    currentColumn = width - 1;
     
+    // 全体を左にシフト
+    for (let x = 0; x < width - 1; x++) {
+      for (let y = 0; y < heatmapHeight; y++) {
+        heatmapBuffer[x][y] = heatmapBuffer[x + 1][y];
+      }
+    }
+    
+    // 右端の列をクリア
+    for (let y = 0; y < heatmapHeight; y++) {
+      heatmapBuffer[width - 1][y] = 0;
+    }
+  }
+
+  // 描画ワーカーが利用可能な場合はワーカーを使用
+  if (renderWorker.value) {
+    // リクエストIDを生成
+    const requestId = renderRequestIdCounter++;
+    
+    // ワーカーにヒートマップ生成をリクエスト
+    renderWorker.value.postMessage({
+      action: 'prepareHeatMap',
+      data: {
+        frequencyData: heatmapBuffer.map(column => new Uint8Array(column)),
+        width,
+        height,
+        requestId
+      }
+    });
+    
+    // コールバックを登録
+    pendingRenderRequests.value.set(requestId, (pixelData) => {
+      // ピクセルデータを使用して描画
+      const imageData = new ImageData(pixelData, width, height);
+      ctx.putImageData(imageData, 0, 0);
+      
+      // 目盛りとマーカーを描画
+      drawScalesAndMarkers(ctx, width, height, maxFrequency, filteredData);
+    });
+  } else {
+    // ワーカーが利用できない場合はメインスレッドで描画
     ctx.clearRect(0, 0, width, height);
 
     // 背景を黒に設定
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
     ctx.fillRect(0, 0, width, height);
-
-    const maxFrequency = 10000;
-    const nyquist = sampleRate / 2;
-    const dataLength = Math.floor((maxFrequency / nyquist) * frequencyData.length);
-    const filteredData = frequencyData.slice(0, dataLength);
-
-    // filteredData をヒートマップの高さに合わせてスケール（y軸が周波数になるため）
-    const scaledFilteredData = frequencyAnalysisService.scaleFrequencyData(
-      filteredData,
-      heatmapHeight,
-      maxFrequency,
-      sampleRate
-    );
-
-    // 現在の列にデータを追加
-    for (let y = 0; y < heatmapHeight; y++) {
-      heatmapBuffer[currentColumn][y] = scaledFilteredData[y];
-    }
-    
-    // 次の列に進む
-    currentColumn = (currentColumn + 1) % width;
-    
-    // 右端に達したらスクロールを開始
-    if (currentColumn === 0) {
-      // 右端に達したら左端に戻る代わりに、スクロールを開始
-      currentColumn = width - 1;
-      
-      // 全体を左にシフト
-      for (let x = 0; x < width - 1; x++) {
-        for (let y = 0; y < heatmapHeight; y++) {
-          heatmapBuffer[x][y] = heatmapBuffer[x + 1][y];
-        }
-      }
-      
-      // 右端の列をクリア
-      for (let y = 0; y < heatmapHeight; y++) {
-        heatmapBuffer[width - 1][y] = 0;
-      }
-    }
 
     // ピクセルごとの色を設定
     const imageData = ctx.createImageData(width, height);
@@ -172,46 +207,58 @@ const updateHeatmap = (frequencyData: Uint8Array) => {
     // ヒートマップを描画
     ctx.putImageData(imageData, 0, 0);
     
-    // 周波数目盛りを描画（y軸）
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'right';
+    // 目盛りとマーカーを描画
+    drawScalesAndMarkers(ctx, width, height, maxFrequency, filteredData);
+  }
+};
+
+// 目盛りとマーカーを描画する関数
+const drawScalesAndMarkers = (
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  maxFrequency: number,
+  filteredData: Uint8Array
+) => {
+  // 周波数目盛りを描画（y軸）
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'right';
+  
+  for (let i = 0; i <= maxFrequency; i += 2000) {
+    // 周波数を反転（低周波数が下、高周波数が上）
+    const y = height - (i / maxFrequency) * height;
+    ctx.fillText(`${i/1000}k`, 25, y);
+  }
+  
+  // 時間軸のラベル（x軸）
+  ctx.textAlign = 'center';
+  ctx.fillText('時間', width / 2, height - 5);
+  
+  // 周波数軸のラベル（y軸）
+  ctx.textAlign = 'center';
+  ctx.save();
+  ctx.translate(15, height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('周波数 (Hz)', 0, 0);
+  ctx.restore();
+  
+  // 基本周波数と倍音の位置にマーカーを表示
+  if (props.baseFrequency > 50) {
+    const fftSize = props.frequencyData.length * 2;
+    const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
+    // 周波数を反転（低周波数が下、高周波数が上）
+    const baseY = height - (baseIdx / filteredData.length) * height;
     
-    for (let i = 0; i <= maxFrequency; i += 2000) {
-      // 周波数を反転（低周波数が下、高周波数が上）
-      const y = height - (i / maxFrequency) * height;
-      ctx.fillText(`${i/1000}k`, 25, y);
-    }
-    
-    // 時間軸のラベル（x軸）
-    ctx.textAlign = 'center';
-    ctx.fillText('時間', width / 2, height - 5);
-    
-    // 周波数軸のラベル（y軸）
-    ctx.textAlign = 'center';
-    ctx.save();
-    ctx.translate(15, height / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText('周波数 (Hz)', 0, 0);
-    ctx.restore();
-    
-    // 基本周波数と倍音の位置にマーカーを表示
-    if (props.baseFrequency > 50) {
-      const fftSize = props.frequencyData.length * 2;
-      const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
-      // 周波数を反転（低周波数が下、高周波数が上）
-      const baseY = height - (baseIdx / filteredData.length) * height;
-      
-      if (baseY > 0 && baseY < height) {
-        // 基本周波数の位置に三角形のマーカーを描画
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-        ctx.beginPath();
-        ctx.moveTo(0, baseY - 5);
-        ctx.lineTo(0, baseY + 5);
-        ctx.lineTo(10, baseY);
-        ctx.closePath();
-        ctx.fill();
-      }
+    if (baseY > 0 && baseY < height) {
+      // 基本周波数の位置に三角形のマーカーを描画
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.beginPath();
+      ctx.moveTo(0, baseY - 5);
+      ctx.lineTo(0, baseY + 5);
+      ctx.lineTo(10, baseY);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 };
@@ -295,10 +342,43 @@ watchEffect(() => {
   updateHeatmap(props.frequencyData);
 });
 
-// コンポーネントがマウントされたときに初期描画
+// コンポーネントがマウント時にワーカーを初期化
 onMounted(() => {
+  // 描画ワーカーを作成
+  try {
+    renderWorker.value = new Worker(new URL('../../workers/render-worker.js', import.meta.url));
+    
+    // ワーカーからのメッセージを処理
+    renderWorker.value.onmessage = (e) => {
+      const { action, requestId, pixelData } = e.data;
+      
+      if (action === 'heatMapPrepared') {
+        // 対応するリクエストのコールバックを呼び出す
+        const callback = pendingRenderRequests.value.get(requestId);
+        if (callback) {
+          callback(pixelData);
+          pendingRenderRequests.value.delete(requestId);
+        }
+      }
+    };
+    
+    console.log('描画ワーカーを作成しました');
+  } catch (error) {
+    console.error('描画ワーカーの作成に失敗しました:', error);
+  }
+  
+  // 初期描画
   if (heatmapCanvas.value) {
     updateHeatmap(props.frequencyData);
+  }
+});
+
+// コンポーネントがアンマウントされたときにリソースを解放
+onUnmounted(() => {
+  // ワーカーを終了
+  if (renderWorker.value) {
+    renderWorker.value.terminate();
+    renderWorker.value = null;
   }
 });
 
