@@ -115,6 +115,7 @@ import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
 import { audioService, pitchDetectionService } from "../../services";
 import HeatMapCanvas from "../atoms/HeatMapCanvas.vue";
 import AudioFileUploader from "../molecules/AudioFileUploader.vue";
+import fourierTransform from "fourier-transform";
 const activeTab = ref<string>("microphone");
 const currentPitch = ref<number>(0);
 const frequencyData = ref<Uint8Array>(new Uint8Array(1024));
@@ -344,12 +345,15 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
     // 分析用の一時バッファ
     const tempBuffer = new Float32Array(bufferSize);
     
+    // 時間的平滑化のための前回のフレームデータを保持する配列
+    let previousFrequencyData: Uint8Array | null = null;
+    
     try {
       // 音声ファイルの長さを取得
       const duration = audioBuffer.duration;
       
-      // 240frame/sの粒度で分析
-      const frameInterval = 1 / 240; // 秒単位のフレーム間隔
+      // 120frame/sの粒度で分析（ユーザー指定）
+      const frameInterval = 1 / 120; // 秒単位のフレーム間隔
       const totalFrames = Math.ceil(duration / frameInterval);
       
       console.log(`分析フレーム数: ${totalFrames} (${frameInterval}秒間隔)`);
@@ -383,23 +387,72 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
         // 周波数データを取得
         const currentFrequencyData = new Uint8Array(frequencyBinCount);
         
-        // 一時的なバッファを作成
-        const tempAudioBuffer = offlineContext.createBuffer(1, bufferSize, sampleRate);
-        const tempChannel = tempAudioBuffer.getChannelData(0);
+        // fourier-transformライブラリを使用して正確なFFT計算を行う
         
-        // データをコピー
+        // 窓関数（ブラックマン窓）を適用 - ハミング窓よりもスペクトル漏れが少ない
+        const windowedBuffer = new Float32Array(bufferSize);
         for (let i = 0; i < bufferSize; i++) {
-          tempChannel[i] = tempBuffer[i];
+          // ブラックマン窓: 0.42 - 0.5 * cos(2π * i / (N-1)) + 0.08 * cos(4π * i / (N-1))
+          const windowValue = 0.42 - 0.5 * Math.cos(2 * Math.PI * i / (bufferSize - 1)) + 0.08 * Math.cos(4 * Math.PI * i / (bufferSize - 1));
+          windowedBuffer[i] = tempBuffer[i] * windowValue;
         }
         
-        // FFT分析を行う
-        const offlineSource = offlineContext.createBufferSource();
-        offlineSource.buffer = tempAudioBuffer;
-        offlineSource.connect(offlineAnalyser);
+        // FFT計算を実行
+        const fftResult = fourierTransform(windowedBuffer);
         
-        // 周波数データを取得（オフライン分析）
-        offlineSource.start();
-        offlineAnalyser.getByteFrequencyData(currentFrequencyData);
+        // FFT結果は複素数の絶対値（マグニチュード）の配列
+        // これを0-255の範囲にスケーリングしてUint8Arrayに変換
+        
+        // 最大値を見つける
+        let maxMagnitude = 0;
+        for (let i = 0; i < fftResult.length; i++) {
+          if (fftResult[i] > maxMagnitude) {
+            maxMagnitude = fftResult[i];
+          }
+        }
+        
+        // 一時的な周波数データを作成
+        const tempFrequencyData = new Uint8Array(frequencyBinCount);
+        
+        // 0-255の範囲にスケーリング - パラメータを調整して低振幅信号の強調を抑制
+        for (let i = 0; i < Math.min(fftResult.length, frequencyBinCount); i++) {
+          // 対数スケールでスケーリング（人間の聴覚特性に近い）- 係数を100に調整
+          const scaledValue = Math.log10(1 + fftResult[i] * 100) / Math.log10(1 + maxMagnitude * 100) * 255;
+          tempFrequencyData[i] = Math.min(255, Math.max(0, Math.floor(scaledValue)));
+        }
+        
+        // 周波数的平滑化の強化 - より広い範囲での移動平均
+        const smoothingFactor = 3; // 平滑化の強さを増加
+        for (let i = 0; i < frequencyBinCount; i++) {
+          let sum = 0;
+          let count = 0;
+          
+          // 周囲のビンの値を平均化
+          for (let j = Math.max(0, i - smoothingFactor); j <= Math.min(frequencyBinCount - 1, i + smoothingFactor); j++) {
+            sum += tempFrequencyData[j];
+            count++;
+          }
+          
+          currentFrequencyData[i] = Math.floor(sum / count);
+        }
+        
+        // 時間的平滑化の追加 - 前回のフレームデータがあれば平均化
+        if (previousFrequencyData) {
+          const temporalSmoothingFactor = 0.7; // 時間的平滑化の強さ (0.0-1.0)
+          for (let i = 0; i < frequencyBinCount; i++) {
+            currentFrequencyData[i] = Math.floor(
+              previousFrequencyData[i] * temporalSmoothingFactor +
+              currentFrequencyData[i] * (1 - temporalSmoothingFactor)
+            );
+          }
+        }
+        
+        // 現在のデータを次回の平滑化のために保存
+        previousFrequencyData = new Uint8Array(currentFrequencyData);
+        
+        if (frame % 30 === 0) { // ログ出力を減らす
+          console.log(`フレーム ${frame}: FFT計算完了 (最大値: ${maxMagnitude.toFixed(6)})`);
+        }
         
         // ピッチを検出
         const pitch = pitchDetectionService.detectPitch(
@@ -411,7 +464,18 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
         // 分析データを保存
         analysisData.value.timestamps.push(currentTime);
         analysisData.value.pitchData.push(pitch);
-        analysisData.value.frequencyData.push(new Uint8Array([...currentFrequencyData]));
+        // 周波数データのディープコピーを作成して保存
+        const frequencyDataCopy = new Uint8Array(currentFrequencyData.length);
+        for (let i = 0; i < currentFrequencyData.length; i++) {
+          frequencyDataCopy[i] = currentFrequencyData[i];
+        }
+        analysisData.value.frequencyData.push(frequencyDataCopy);
+        
+        // デバッグ用：周波数データの最大値を確認
+        const maxFreq = Math.max(...Array.from(frequencyDataCopy));
+        if (frame % progressStep === 0) {
+          console.log(`フレーム ${frame} の周波数データ最大値: ${maxFreq}`);
+        }
         
         // 進捗表示
         if (frame % progressStep === 0) {
@@ -552,7 +616,18 @@ const updateDisplayWithCurrentTime = (currentTime: number) => {
   }
   
   if (closestIndex >= 0 && closestIndex < analysisData.value.frequencyData.length) {
-    frequencyData.value = analysisData.value.frequencyData[closestIndex];
+    // 保存された周波数データのディープコピーを作成
+    const savedFrequencyData = analysisData.value.frequencyData[closestIndex];
+    
+    // デバッグ用：周波数データの最大値を確認
+    const maxFreq = Math.max(...Array.from(savedFrequencyData));
+    console.log(`時間 ${currentTime}秒 の周波数データ最大値: ${maxFreq}`);
+    
+    // 新しいUint8Arrayを作成してデータをコピー
+    frequencyData.value = new Uint8Array(savedFrequencyData.length);
+    for (let i = 0; i < savedFrequencyData.length; i++) {
+      frequencyData.value[i] = savedFrequencyData[i];
+    }
   }
 };
 </script>
