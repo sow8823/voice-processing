@@ -58,16 +58,44 @@
     </v-window>
 
     <v-card class="mb-6">
-      <v-card-title>
-        <v-icon start icon="mdi-waveform" class="mr-2"></v-icon>
-        ピッチ検出
+      <v-card-title class="d-flex align-center justify-space-between">
+        <div class="d-flex align-center">
+          <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
+          <span>周波数ヒートマップ</span>
+        </div>
+        <v-card class="legend-card">
+          <div class="legend-gradient"></div>
+          <div class="d-flex justify-space-between">
+            <span class="text-caption text-white">低</span>
+            <span class="text-caption text-white">高</span>
+          </div>
+        </v-card>
       </v-card-title>
       <v-card-text>
-        <PitchCanvas :currentPitch="currentPitch" />
+        <HeatMapCanvas
+          ref="heatMapCanvasRef"
+          :frequencyData="frequencyData"
+          :base-frequency="currentPitch"
+          :analysisData="analysisData"
+          :currentPlaybackTime="currentPlaybackTime"
+          :duration="fileAudioBuffer?.duration"
+        />
       </v-card-text>
     </v-card>
 
     <v-row>
+      <v-col cols="12" md="6">
+        <v-card height="100%">
+          <v-card-title>
+            <v-icon start icon="mdi-waveform" class="mr-2"></v-icon>
+            ピッチ検出
+          </v-card-title>
+          <v-card-text>
+            <PitchCanvas :currentPitch="currentPitch" />
+          </v-card-text>
+        </v-card>
+      </v-col>
+      
       <v-col cols="12" md="6">
         <v-card height="100%">
           <v-card-title>
@@ -76,31 +104,6 @@
           </v-card-title>
           <v-card-text>
             <SpectrumCanvas :frequencyData="frequencyData" :base-frequency="currentPitch" />
-          </v-card-text>
-        </v-card>
-      </v-col>
-      
-      <v-col cols="12" md="6">
-        <v-card height="100%">
-          <v-card-title class="d-flex align-center justify-space-between">
-            <div class="d-flex align-center">
-              <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
-              <span>周波数ヒートマップ</span>
-            </div>
-            <v-card class="legend-card">
-              <div class="legend-gradient"></div>
-              <div class="d-flex justify-space-between">
-                <span class="text-caption text-white">低</span>
-                <span class="text-caption text-white">高</span>
-              </div>
-            </v-card>
-          </v-card-title>
-          <v-card-text>
-            <HeatMapCanvas
-              ref="heatMapCanvasRef"
-              :frequencyData="frequencyData"
-              :base-frequency="currentPitch"
-            />
           </v-card-text>
         </v-card>
       </v-col>
@@ -495,7 +498,7 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
       currentPitch.value = 0;
       frequencyData.value = new Uint8Array(frequencyBinCount);
       
-      // ヒートマップをリセット
+      // ヒートマップをリセット（分析データを表示するため）
       if (heatMapCanvasRef.value) {
         heatMapCanvasRef.value.resetHeatmap();
       }
@@ -544,10 +547,7 @@ const handlePlaybackStarted = (currentTime: number) => {
   // 初期表示用にデータを設定
   updateDisplayWithCurrentTime(currentTime);
   
-  // ヒートマップをリセット
-  if (heatMapCanvasRef.value) {
-    heatMapCanvasRef.value.resetHeatmap();
-  }
+  // 再生開始時はヒートマップをリセットしない（分析データを表示したまま）
 };
 
 // 再生時間更新時の処理（スライダーからの更新）

@@ -38,7 +38,17 @@ import { ref, defineProps, defineExpose, watchEffect, computed, watch, onMounted
 import { useTheme } from "vuetify";
 import { frequencyAnalysisService } from "../../services";
 
-const props = defineProps<{ frequencyData: Uint8Array; baseFrequency: number }>();
+const props = defineProps<{
+  frequencyData: Uint8Array;
+  baseFrequency: number;
+  // 新しいプロパティ
+  analysisData?: {
+    frequencyData: Uint8Array[];
+    timestamps: number[];
+  };
+  currentPlaybackTime?: number;
+  duration?: number;
+}>();
 
 const heatmapCanvas = ref<HTMLCanvasElement | null>(null);
 const sampleRate = 44100; // サンプリング周波数、今回は基本的な値として 44100Hz を使用
@@ -100,119 +110,234 @@ const getColor = (value: number): [number, number, number, number] => {
   }
 };
 
-const updateHeatmap = (frequencyData: Uint8Array) => {
+// 目盛りとマーカーを描画する共通関数
+const drawScalesAndMarkers = (ctx: CanvasRenderingContext2D, width: number, height: number, filteredData: Uint8Array) => {
+  const maxFrequency = 10000;
+  
+  // 周波数目盛りを描画（y軸）
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'right';
+  
+  for (let i = 0; i <= maxFrequency; i += 2000) {
+    // 周波数を反転（低周波数が下、高周波数が上）
+    const y = height - (i / maxFrequency) * height;
+    ctx.fillText(`${i/1000}k`, 25, y);
+  }
+  
+  // 時間軸のラベル（x軸）
+  ctx.textAlign = 'center';
+  ctx.fillText('時間', width / 2, height - 5);
+  
+  // 周波数軸のラベル（y軸）
+  ctx.textAlign = 'center';
+  ctx.save();
+  ctx.translate(15, height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('周波数 (Hz)', 0, 0);
+  ctx.restore();
+  
+  // 基本周波数と倍音の位置にマーカーを表示
+  // if (props.baseFrequency > 50) {
+  //   const fftSize = props.frequencyData.length * 2;
+  //   const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
+  //   // 周波数を反転（低周波数が下、高周波数が上）
+  //   const baseY = height - (baseIdx / filteredData.length) * height;
+    
+  //   if (baseY > 0 && baseY < height) {
+  //     // 基本周波数の位置に三角形のマーカーを描画
+  //     ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+  //     ctx.beginPath();
+  //     ctx.moveTo(0, baseY - 5);
+  //     ctx.lineTo(0, baseY + 5);
+  //     ctx.lineTo(10, baseY);
+  //     ctx.closePath();
+  //     ctx.fill();
+  //   }
+  // }
+};
+
+// リアルタイムモード用のヒートマップ更新関数
+const updateRealtimeHeatmap = (frequencyData: Uint8Array) => {
   const ctx = heatmapCanvas.value?.getContext("2d");
-  if (ctx) {
-    const width = ctx.canvas.width;
-    const height = ctx.canvas.height;
+  if (!ctx) return;
+  
+  const width = ctx.canvas.width;
+  const height = ctx.canvas.height;
+  
+  ctx.clearRect(0, 0, width, height);
+
+  // 背景を黒に設定
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+  ctx.fillRect(0, 0, width, height);
+
+  const maxFrequency = 10000;
+  const nyquist = sampleRate / 2;
+  const dataLength = Math.floor((maxFrequency / nyquist) * frequencyData.length);
+  const filteredData = frequencyData.slice(0, dataLength);
+
+  // filteredData をヒートマップの高さに合わせてスケール（y軸が周波数になるため）
+  const scaledFilteredData = frequencyAnalysisService.scaleFrequencyData(
+    filteredData,
+    heatmapHeight,
+    maxFrequency,
+    sampleRate
+  );
+
+  // 現在の列にデータを追加
+  for (let y = 0; y < heatmapHeight; y++) {
+    heatmapBuffer[currentColumn][y] = scaledFilteredData[y];
+  }
+  
+  // 次の列に進む
+  currentColumn = (currentColumn + 1) % width;
+  
+  // 右端に達したらスクロールを開始
+  if (currentColumn === 0) {
+    // 右端に達したら左端に戻る代わりに、スクロールを開始
+    currentColumn = width - 1;
     
-    ctx.clearRect(0, 0, width, height);
-
-    // 背景を黒に設定
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-    ctx.fillRect(0, 0, width, height);
-
-    const maxFrequency = 10000;
-    const nyquist = sampleRate / 2;
-    const dataLength = Math.floor((maxFrequency / nyquist) * frequencyData.length);
-    const filteredData = frequencyData.slice(0, dataLength);
-
-    // filteredData をヒートマップの高さに合わせてスケール（y軸が周波数になるため）
-    const scaledFilteredData = frequencyAnalysisService.scaleFrequencyData(
-      filteredData,
-      heatmapHeight,
-      maxFrequency,
-      sampleRate
-    );
-
-    // 現在の列にデータを追加
-    for (let y = 0; y < heatmapHeight; y++) {
-      heatmapBuffer[currentColumn][y] = scaledFilteredData[y];
-    }
-    
-    // 次の列に進む
-    currentColumn = (currentColumn + 1) % width;
-    
-    // 右端に達したらスクロールを開始
-    if (currentColumn === 0) {
-      // 右端に達したら左端に戻る代わりに、スクロールを開始
-      currentColumn = width - 1;
-      
-      // 全体を左にシフト
-      for (let x = 0; x < width - 1; x++) {
-        for (let y = 0; y < heatmapHeight; y++) {
-          heatmapBuffer[x][y] = heatmapBuffer[x + 1][y];
-        }
-      }
-      
-      // 右端の列をクリア
+    // 全体を左にシフト
+    for (let x = 0; x < width - 1; x++) {
       for (let y = 0; y < heatmapHeight; y++) {
-        heatmapBuffer[width - 1][y] = 0;
+        heatmapBuffer[x][y] = heatmapBuffer[x + 1][y];
       }
     }
+    
+    // 右端の列をクリア
+    for (let y = 0; y < heatmapHeight; y++) {
+      heatmapBuffer[width - 1][y] = 0;
+    }
+  }
 
-    // ピクセルごとの色を設定
-    const imageData = ctx.createImageData(width, height);
+  // ピクセルごとの色を設定
+  const imageData = ctx.createImageData(width, height);
 
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        // 現在のバッファから直接値を取得
-        const value = heatmapBuffer[x][y];
-        
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      // 現在のバッファから直接値を取得
+      const value = heatmapBuffer[x][y];
+      
+      const [r, g, b, a] = getColor(value);
+      const index = (y * width + x) * 4;
+
+      imageData.data[index] = r;     // R
+      imageData.data[index + 1] = g; // G
+      imageData.data[index + 2] = b; // B
+      imageData.data[index + 3] = a; // A
+    }
+  }
+
+  // ヒートマップを描画
+  ctx.putImageData(imageData, 0, 0);
+  
+  drawScalesAndMarkers(ctx, width, height, filteredData);
+};
+
+// ファイル分析モード用のヒートマップ更新関数
+const updateFileAnalysisHeatmap = () => {
+  if (!props.analysisData || !props.duration) return;
+  
+  const ctx = heatmapCanvas.value?.getContext("2d");
+  if (!ctx) return;
+  
+  const width = ctx.canvas.width;
+  const height = ctx.canvas.height;
+  
+  ctx.clearRect(0, 0, width, height);
+
+  // 背景を黒に設定
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+  ctx.fillRect(0, 0, width, height);
+
+  const maxFrequency = 10000;
+  const nyquist = sampleRate / 2;
+  
+  // ファイル全体のヒートマップを描画するためのイメージデータ
+  const imageData = ctx.createImageData(width, height);
+  
+  // 分析データの各フレームをヒートマップに配置
+  const { frequencyData, timestamps } = props.analysisData;
+  const totalDuration = props.duration;
+  
+  // 画像データを初期化（黒で塗りつぶし）
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    imageData.data[i] = 0;       // R
+    imageData.data[i + 1] = 0;   // G
+    imageData.data[i + 2] = 0;   // B
+    imageData.data[i + 3] = 255; // A
+  }
+  
+  // 時間軸の解像度を計算（幅に対して均等に分布させる）
+  const timeResolution = width / totalDuration;
+  
+  // 各フレームの周波数データをヒートマップに配置
+  // フレーム数が多すぎる場合は間引く
+  const frameStep = Math.max(1, Math.floor(frequencyData.length / width));
+  
+  for (let frameIndex = 0; frameIndex < frequencyData.length; frameIndex += frameStep) {
+    // フレームの時間位置からx座標を計算
+    const frameTime = timestamps[frameIndex];
+    const x = Math.floor(frameTime * timeResolution);
+    
+    if (x >= 0 && x < width) {
+      const frameData = frequencyData[frameIndex];
+      const dataLength = Math.floor((maxFrequency / nyquist) * frameData.length);
+      const filteredData = frameData.slice(0, dataLength);
+      
+      // filteredData をヒートマップの高さに合わせてスケール
+      const scaledData = frequencyAnalysisService.scaleFrequencyData(
+        filteredData,
+        height,
+        maxFrequency,
+        sampleRate
+      );
+      
+      // このフレームのデータを画像の対応する列に配置
+      for (let y = 0; y < height; y++) {
+        const value = scaledData[y];
         const [r, g, b, a] = getColor(value);
         const index = (y * width + x) * 4;
-
-        imageData.data[index] = r;     // R
-        imageData.data[index + 1] = g; // G
-        imageData.data[index + 2] = b; // B
-        imageData.data[index + 3] = a; // A
+        
+        // インデックスが有効な範囲内かチェック
+        if (index >= 0 && index < imageData.data.length - 3) {
+          imageData.data[index] = r;     // R
+          imageData.data[index + 1] = g; // G
+          imageData.data[index + 2] = b; // B
+          imageData.data[index + 3] = a; // A
+        }
       }
     }
+  }
+  
+  // ヒートマップを描画
+  ctx.putImageData(imageData, 0, 0);
+  
+  // 目盛りとマーカーを描画
+  const dummyFilteredData = new Uint8Array(1024); // drawScalesAndMarkersに渡すためのダミーデータ
+  drawScalesAndMarkers(ctx, width, height, dummyFilteredData);
+  
+  // 現在の再生位置を示す白いラインを描画
+  if (props.currentPlaybackTime !== undefined && props.duration > 0) {
+    const playbackX = Math.floor((props.currentPlaybackTime / props.duration) * width);
+    
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(playbackX, 0);
+    ctx.lineTo(playbackX, height);
+    ctx.stroke();
+  }
+};
 
-    // ヒートマップを描画
-    ctx.putImageData(imageData, 0, 0);
-    
-    // 周波数目盛りを描画（y軸）
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'right';
-    
-    for (let i = 0; i <= maxFrequency; i += 2000) {
-      // 周波数を反転（低周波数が下、高周波数が上）
-      const y = height - (i / maxFrequency) * height;
-      ctx.fillText(`${i/1000}k`, 25, y);
-    }
-    
-    // 時間軸のラベル（x軸）
-    ctx.textAlign = 'center';
-    ctx.fillText('時間', width / 2, height - 5);
-    
-    // 周波数軸のラベル（y軸）
-    ctx.textAlign = 'center';
-    ctx.save();
-    ctx.translate(15, height / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText('周波数 (Hz)', 0, 0);
-    ctx.restore();
-    
-    // 基本周波数と倍音の位置にマーカーを表示
-    if (props.baseFrequency > 50) {
-      const fftSize = props.frequencyData.length * 2;
-      const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
-      // 周波数を反転（低周波数が下、高周波数が上）
-      const baseY = height - (baseIdx / filteredData.length) * height;
-      
-      if (baseY > 0 && baseY < height) {
-        // 基本周波数の位置に三角形のマーカーを描画
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-        ctx.beginPath();
-        ctx.moveTo(0, baseY - 5);
-        ctx.lineTo(0, baseY + 5);
-        ctx.lineTo(10, baseY);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
+// 適切なヒートマップ更新関数を選択して実行
+const updateHeatmap = (frequencyData: Uint8Array) => {
+  if (props.analysisData && props.duration) {
+    // ファイル分析モード
+    updateFileAnalysisHeatmap();
+  } else {
+    // リアルタイムモード
+    updateRealtimeHeatmap(frequencyData);
   }
 };
 
@@ -338,40 +463,19 @@ const resetHeatmap = () => {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
     ctx.fillRect(0, 0, width, height);
     
-    // 目盛りを再描画
-    drawScales(ctx, width, height);
+    // ファイル分析モードの場合は、全体のヒートマップを描画
+    if (props.analysisData && props.duration) {
+      updateFileAnalysisHeatmap();
+    } else {
+      // リアルタイムモードの場合は目盛りのみ描画
+      const dummyFilteredData = new Uint8Array(1024);
+      drawScalesAndMarkers(ctx, width, height, dummyFilteredData);
+    }
   }
   
   console.log('ヒートマップをリセットしました');
 };
 
-// 目盛りを描画する関数
-const drawScales = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-  const maxFrequency = 10000;
-  
-  // 周波数目盛りを描画（y軸）
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-  ctx.font = '10px sans-serif';
-  ctx.textAlign = 'right';
-  
-  for (let i = 0; i <= maxFrequency; i += 2000) {
-    // 周波数を反転（低周波数が下、高周波数が上）
-    const y = height - (i / maxFrequency) * height;
-    ctx.fillText(`${i/1000}k`, 25, y);
-  }
-  
-  // 時間軸のラベル（x軸）
-  ctx.textAlign = 'center';
-  ctx.fillText('時間', width / 2, height - 5);
-  
-  // 周波数軸のラベル（y軸）
-  ctx.textAlign = 'center';
-  ctx.save();
-  ctx.translate(15, height / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillText('周波数 (Hz)', 0, 0);
-  ctx.restore();
-};
 
 // 外部に公開するメソッド
 defineExpose({
