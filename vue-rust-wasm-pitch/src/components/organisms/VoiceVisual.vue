@@ -57,6 +57,7 @@
       </v-window-item>
     </v-window>
 
+    <!-- タブに応じて適切なヒートマップコンポーネントを表示 -->
     <v-card class="mb-6">
       <v-card-title class="d-flex align-center justify-space-between">
         <div class="d-flex align-center">
@@ -72,8 +73,18 @@
         </v-card>
       </v-card-title>
       <v-card-text>
-        <HeatMapCanvas
-          ref="heatMapCanvasRef"
+        <!-- マイク入力（リアルタイム）モードの場合 -->
+        <RealtimeHeatMapCanvas
+          v-if="activeTab === 'microphone'"
+          ref="realtimeHeatMapCanvasRef"
+          :frequencyData="frequencyData"
+          :base-frequency="currentPitch"
+        />
+        
+        <!-- ファイル入力モードの場合 -->
+        <FileHeatMapCanvas
+          v-else
+          ref="fileHeatMapCanvasRef"
           :frequencyData="frequencyData"
           :base-frequency="currentPitch"
           :analysisData="analysisData"
@@ -116,7 +127,8 @@ import { ref, onUnmounted, watch } from "vue";
 import PitchCanvas from "../atoms/PitchCanvas.vue";
 import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
 import { audioService, pitchDetectionService } from "../../services";
-import HeatMapCanvas from "../atoms/HeatMapCanvas.vue";
+import RealtimeHeatMapCanvas from "../atoms/RealtimeHeatMapCanvas.vue";
+import FileHeatMapCanvas from "../atoms/FileHeatMapCanvas.vue";
 import AudioFileUploader from "../molecules/AudioFileUploader.vue";
 import fourierTransform from "fourier-transform";
 const activeTab = ref<string>("microphone");
@@ -126,7 +138,8 @@ const isProcessing = ref<boolean>(false);
 const isLoading = ref<boolean>(false);
 const animationFrameId = ref<number | null>(null);
 const fileAudioBuffer = ref<AudioBuffer | null>(null);
-const heatMapCanvasRef = ref<InstanceType<typeof HeatMapCanvas> | null>(null);
+const realtimeHeatMapCanvasRef = ref<InstanceType<typeof RealtimeHeatMapCanvas> | null>(null);
+const fileHeatMapCanvasRef = ref<InstanceType<typeof FileHeatMapCanvas> | null>(null);
 const analysisCompleted = ref<boolean>(false);
 
 // 分析データを保存するための状態
@@ -182,9 +195,9 @@ const startAudio = async () => {
   isLoading.value = true;
   
   try {
-    // ヒートマップをリセット
-    if (heatMapCanvasRef.value) {
-      heatMapCanvasRef.value.resetHeatmap();
+    // リアルタイムヒートマップをリセット
+    if (realtimeHeatMapCanvasRef.value) {
+      realtimeHeatMapCanvasRef.value.resetHeatmap();
     }
     
     // ピッチ検出サービスを初期化
@@ -498,9 +511,9 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
       currentPitch.value = 0;
       frequencyData.value = new Uint8Array(frequencyBinCount);
       
-      // ヒートマップをリセット（分析データを表示するため）
-      if (heatMapCanvasRef.value) {
-        heatMapCanvasRef.value.resetHeatmap();
+      // ファイル分析ヒートマップをリセット（分析データを表示するため）
+      if (fileHeatMapCanvasRef.value) {
+        fileHeatMapCanvasRef.value.resetHeatmap();
       }
       
       // 分析完了フラグを設定
@@ -557,9 +570,9 @@ const handlePlaybackTimeUpdated = (currentTime: number) => {
   // スライダーの位置に合わせて表示を更新
   updateDisplayWithCurrentTime(currentTime);
   
-  // ヒートマップのスクロール位置を再生位置に合わせて自動調整
-  if (heatMapCanvasRef.value && analysisCompleted.value) {
-    heatMapCanvasRef.value.adjustScrollToPlaybackTime(currentTime);
+  // ファイル分析ヒートマップのスクロール位置を再生位置に合わせて自動調整
+  if (fileHeatMapCanvasRef.value && analysisCompleted.value) {
+    fileHeatMapCanvasRef.value.adjustScrollToPlaybackTime(currentTime);
   }
   
   console.log(`スライダー位置更新: ${currentTime}秒 (${Math.round(currentTime * 120)}分割)`);
@@ -573,9 +586,9 @@ const handleSeekToTime = (seekTime: number) => {
   // シーク位置に合わせて表示を更新
   updateDisplayWithCurrentTime(seekTime);
   
-  // ヒートマップのスクロール位置を再生位置に合わせて自動調整
-  if (heatMapCanvasRef.value && analysisCompleted.value) {
-    heatMapCanvasRef.value.adjustScrollToPlaybackTime(seekTime);
+  // ファイル分析ヒートマップのスクロール位置を再生位置に合わせて自動調整
+  if (fileHeatMapCanvasRef.value && analysisCompleted.value) {
+    fileHeatMapCanvasRef.value.adjustScrollToPlaybackTime(seekTime);
   }
 };
 
