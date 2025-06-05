@@ -557,6 +557,11 @@ const handlePlaybackTimeUpdated = (currentTime: number) => {
   // スライダーの位置に合わせて表示を更新
   updateDisplayWithCurrentTime(currentTime);
   
+  // ヒートマップのスクロール位置を再生位置に合わせて自動調整
+  if (heatMapCanvasRef.value && analysisCompleted.value) {
+    heatMapCanvasRef.value.adjustScrollToPlaybackTime(currentTime);
+  }
+  
   console.log(`スライダー位置更新: ${currentTime}秒 (${Math.round(currentTime * 120)}分割)`);
 };
 
@@ -566,7 +571,12 @@ const handleSeekToTime = (seekTime: number) => {
   currentPlaybackTime.value = seekTime;
   
   // シーク位置に合わせて表示を更新
-  // updateDisplayWithCurrentTimeはhandlePlaybackTimeUpdatedで呼び出されるため、ここでは不要
+  updateDisplayWithCurrentTime(seekTime);
+  
+  // ヒートマップのスクロール位置を再生位置に合わせて自動調整
+  if (heatMapCanvasRef.value && analysisCompleted.value) {
+    heatMapCanvasRef.value.adjustScrollToPlaybackTime(seekTime);
+  }
 };
 
 // 再生終了時の処理

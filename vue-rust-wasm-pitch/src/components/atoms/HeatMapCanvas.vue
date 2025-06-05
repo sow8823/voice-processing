@@ -1,7 +1,36 @@
 <template>
   <div>
-    <div class="canvas-wrapper position-relative">
-      <canvas ref="heatmapCanvas" :width="heatmapWidth" :height="heatmapHeight"></canvas>
+    <div class="heatmap-container">
+      <div class="canvas-wrapper position-relative">
+        <canvas ref="heatmapCanvas" :width="heatmapWidth" :height="heatmapHeight"></canvas>
+      </div>
+      
+      <!-- ファイル分析モードで、かつファイルの長さが10秒を超える場合にのみスクロールコントロールを表示 -->
+      <div v-if="isFileAnalysisMode && props.duration && props.duration > displayDuration" class="scroll-controls mt-2">
+        <v-slider
+          v-model="scrollPosition"
+          :min="0"
+          :max="maxScrollPosition"
+          :step="0.01"
+          hide-details
+          density="compact"
+          color="primary"
+          track-color="grey-darken-1"
+          @update:model-value="handleScroll"
+        >
+          <template v-slot:prepend>
+            <v-icon size="small" color="primary">mdi-arrow-left</v-icon>
+          </template>
+          <template v-slot:append>
+            <v-icon size="small" color="primary">mdi-arrow-right</v-icon>
+          </template>
+        </v-slider>
+        <div class="d-flex justify-space-between text-caption mt-1">
+          <span>{{ formatTime(viewStartTime) }}</span>
+          <span>表示範囲: {{ formatTime(viewStartTime) }} - {{ formatTime(viewEndTime) }}</span>
+          <span>{{ formatTime(totalDuration) }}</span>
+        </div>
+      </div>
     </div>
     
     <v-row class="mt-2">
@@ -54,8 +83,49 @@ const heatmapCanvas = ref<HTMLCanvasElement | null>(null);
 const sampleRate = 44100; // サンプリング周波数、今回は基本的な値として 44100Hz を使用
 const theme = useTheme();
 
+// キャンバスサイズ
 const heatmapWidth = 800;
 const heatmapHeight = 300;
+
+// 表示設定
+const displayDuration = 10; // 表示する時間範囲（秒）
+const scrollPosition = ref<number>(0); // スクロール位置（0-1の範囲）
+const viewStartTime = ref<number>(0); // 表示開始時間（秒）
+const viewEndTime = ref<number>(displayDuration); // 表示終了時間（秒）
+const totalDuration = ref<number>(displayDuration); // 音声ファイルの総再生時間（秒）
+
+// ファイル分析モードかどうか
+const isFileAnalysisMode = computed(() => {
+  return props.analysisData && props.duration;
+});
+
+// 最大スクロール位置
+const maxScrollPosition = computed(() => {
+  if (!props.duration) return 0;
+  return Math.max(0, (props.duration - displayDuration) / props.duration);
+});
+
+// スクロール位置が変更されたときの処理
+const handleScroll = (value: number) => {
+  if (!props.duration) return;
+  
+  // 表示範囲を計算
+  viewStartTime.value = value * props.duration;
+  viewEndTime.value = Math.min(props.duration, viewStartTime.value + displayDuration);
+  totalDuration.value = props.duration;
+  
+  // ヒートマップを更新
+  updateFileAnalysisHeatmap();
+};
+
+// 時間を「分:秒.ミリ秒」形式にフォーマットする関数
+const formatTime = (seconds: number): string => {
+  const min = Math.floor(seconds / 60);
+  const sec = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  
+  return `${min}:${sec.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+};
 
 // ヒートマップ用データを動的に管理（x軸が時間、y軸が周波数）
 const heatmapBuffer: Uint8Array[] = Array.from({ length: heatmapWidth }, () => new Uint8Array(heatmapHeight));
@@ -111,7 +181,7 @@ const getColor = (value: number): [number, number, number, number] => {
 };
 
 // 目盛りとマーカーを描画する共通関数
-const drawScalesAndMarkers = (ctx: CanvasRenderingContext2D, width: number, height: number, filteredData: Uint8Array) => {
+const drawScalesAndMarkers = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
   const maxFrequency = 10000;
   
   // 周波数目盛りを描画（y軸）
@@ -231,7 +301,7 @@ const updateRealtimeHeatmap = (frequencyData: Uint8Array) => {
   // ヒートマップを描画
   ctx.putImageData(imageData, 0, 0);
   
-  drawScalesAndMarkers(ctx, width, height, filteredData);
+  drawScalesAndMarkers(ctx, width, height);
 };
 
 // ファイル分析モード用のヒートマップ更新関数
@@ -258,7 +328,20 @@ const updateFileAnalysisHeatmap = () => {
   
   // 分析データの各フレームをヒートマップに配置
   const { frequencyData, timestamps } = props.analysisData;
-  const totalDuration = props.duration;
+  
+  // 表示範囲を更新
+  totalDuration.value = props.duration;
+  
+  // 表示範囲は常に10秒固定
+  // スクロール位置に基づいて表示範囲を計算
+  if (props.duration > displayDuration) {
+    viewStartTime.value = scrollPosition.value * props.duration;
+    viewEndTime.value = Math.min(props.duration, viewStartTime.value + displayDuration);
+  } else {
+    // ファイルが10秒以下の場合でも、表示範囲は0から10秒に固定
+    viewStartTime.value = 0;
+    viewEndTime.value = displayDuration;
+  }
   
   // 画像データを初期化（黒で塗りつぶし）
   for (let i = 0; i < imageData.data.length; i += 4) {
@@ -268,43 +351,47 @@ const updateFileAnalysisHeatmap = () => {
     imageData.data[i + 3] = 255; // A
   }
   
-  // 時間軸の解像度を計算（幅に対して均等に分布させる）
-  const timeResolution = width / totalDuration;
+  // 表示範囲の時間に対する解像度を計算
+  const displayTimeRange = viewEndTime.value - viewStartTime.value;
+  const timeResolution = width / displayTimeRange;
   
   // 各フレームの周波数データをヒートマップに配置
-  // フレーム数が多すぎる場合は間引く
-  const frameStep = Math.max(1, Math.floor(frequencyData.length / width));
-  
-  for (let frameIndex = 0; frameIndex < frequencyData.length; frameIndex += frameStep) {
-    // フレームの時間位置からx座標を計算
+  for (let frameIndex = 0; frameIndex < frequencyData.length; frameIndex++) {
+    // フレームの時間位置
     const frameTime = timestamps[frameIndex];
-    const x = Math.floor(frameTime * timeResolution);
     
-    if (x >= 0 && x < width) {
-      const frameData = frequencyData[frameIndex];
-      const dataLength = Math.floor((maxFrequency / nyquist) * frameData.length);
-      const filteredData = frameData.slice(0, dataLength);
+    // 表示範囲内のフレームのみ処理
+    if (frameTime >= viewStartTime.value && frameTime <= viewEndTime.value) {
+      // 表示範囲内での相対位置を計算
+      const relativeTime = frameTime - viewStartTime.value;
+      const x = Math.floor(relativeTime * timeResolution);
       
-      // filteredData をヒートマップの高さに合わせてスケール
-      const scaledData = frequencyAnalysisService.scaleFrequencyData(
-        filteredData,
-        height,
-        maxFrequency,
-        sampleRate
-      );
-      
-      // このフレームのデータを画像の対応する列に配置
-      for (let y = 0; y < height; y++) {
-        const value = scaledData[y];
-        const [r, g, b, a] = getColor(value);
-        const index = (y * width + x) * 4;
+      if (x >= 0 && x < width) {
+        const frameData = frequencyData[frameIndex];
+        const dataLength = Math.floor((maxFrequency / nyquist) * frameData.length);
+        const filteredData = frameData.slice(0, dataLength);
         
-        // インデックスが有効な範囲内かチェック
-        if (index >= 0 && index < imageData.data.length - 3) {
-          imageData.data[index] = r;     // R
-          imageData.data[index + 1] = g; // G
-          imageData.data[index + 2] = b; // B
-          imageData.data[index + 3] = a; // A
+        // filteredData をヒートマップの高さに合わせてスケール
+        const scaledData = frequencyAnalysisService.scaleFrequencyData(
+          filteredData,
+          height,
+          maxFrequency,
+          sampleRate
+        );
+        
+        // このフレームのデータを画像の対応する列に配置
+        for (let y = 0; y < height; y++) {
+          const value = scaledData[y];
+          const [r, g, b, a] = getColor(value);
+          const index = (y * width + x) * 4;
+          
+          // インデックスが有効な範囲内かチェック
+          if (index >= 0 && index < imageData.data.length - 3) {
+            imageData.data[index] = r;     // R
+            imageData.data[index + 1] = g; // G
+            imageData.data[index + 2] = b; // B
+            imageData.data[index + 3] = a; // A
+          }
         }
       }
     }
@@ -314,19 +401,66 @@ const updateFileAnalysisHeatmap = () => {
   ctx.putImageData(imageData, 0, 0);
   
   // 目盛りとマーカーを描画
-  const dummyFilteredData = new Uint8Array(1024); // drawScalesAndMarkersに渡すためのダミーデータ
-  drawScalesAndMarkers(ctx, width, height, dummyFilteredData);
+  drawScalesAndMarkers(ctx, width, height);
+  
+  // 時間軸の目盛りを追加（常に0から10秒まで）
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'center';
+  
+  // 1秒ごとに目盛りを表示
+  const secondStep = 1; // 1秒ごと
+  for (let t = 0; t <= displayDuration; t += secondStep) {
+    // 表示範囲内での相対位置を計算
+    const relativeTime = t - viewStartTime.value;
+    const x = Math.floor(relativeTime * timeResolution);
+    
+    if (x >= 0 && x < width) {
+      // 目盛り線
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height - 20);
+      ctx.stroke();
+      
+      // 時間ラベル
+      ctx.fillText(`${t}s`, x, height - 5);
+    }
+  }
+  
+  // ファイルの実際の長さを示す縦線（ファイルが10秒未満の場合）
+  if (props.duration < displayDuration) {
+    const fileEndX = Math.floor(props.duration * timeResolution);
+    
+    // ファイル終了位置に縦線を描画
+    ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)'; // 黄色の半透明
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(fileEndX, 0);
+    ctx.lineTo(fileEndX, height);
+    ctx.stroke();
+    
+    // ファイル終了位置にラベルを表示
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.8)';
+    ctx.textAlign = 'center';
+    ctx.fillText('ファイル終了', fileEndX, 15);
+  }
   
   // 現在の再生位置を示す白いラインを描画
   if (props.currentPlaybackTime !== undefined && props.duration > 0) {
-    const playbackX = Math.floor((props.currentPlaybackTime / props.duration) * width);
-    
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(playbackX, 0);
-    ctx.lineTo(playbackX, height);
-    ctx.stroke();
+    // 再生位置が表示範囲内かチェック
+    if (props.currentPlaybackTime >= viewStartTime.value && props.currentPlaybackTime <= viewEndTime.value) {
+      // 表示範囲内での相対位置を計算
+      const relativeTime = props.currentPlaybackTime - viewStartTime.value;
+      const playbackX = Math.floor(relativeTime * timeResolution);
+      
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(playbackX, 0);
+      ctx.lineTo(playbackX, height);
+      ctx.stroke();
+    }
   }
 };
 
@@ -468,22 +602,59 @@ const resetHeatmap = () => {
       updateFileAnalysisHeatmap();
     } else {
       // リアルタイムモードの場合は目盛りのみ描画
-      const dummyFilteredData = new Uint8Array(1024);
-      drawScalesAndMarkers(ctx, width, height, dummyFilteredData);
+      drawScalesAndMarkers(ctx, width, height);
     }
   }
   
   console.log('ヒートマップをリセットしました');
 };
 
+// 再生位置に合わせてスクロール位置を自動調整する関数
+const adjustScrollToPlaybackTime = (playbackTime: number) => {
+  if (!props.duration || !isFileAnalysisMode.value) return;
+  
+  // 再生位置が表示範囲外の場合、スクロール位置を調整
+  if (playbackTime < viewStartTime.value || playbackTime > viewEndTime.value) {
+    // 10秒表示の中央に再生位置が来るようにスクロール位置を調整
+    // ただし、ファイルの先頭と末尾付近では中央に来ないようにする
+    const halfDisplayDuration = displayDuration / 2;
+    let newStartTime = playbackTime - halfDisplayDuration;
+    
+    // 先頭より前にならないように調整
+    newStartTime = Math.max(0, newStartTime);
+    
+    // 末尾を超えないように調整
+    if (newStartTime + displayDuration > props.duration) {
+      newStartTime = Math.max(0, props.duration - displayDuration);
+    }
+    
+    // スクロール位置を更新
+    scrollPosition.value = newStartTime / props.duration;
+    
+    // 表示範囲を更新
+    viewStartTime.value = newStartTime;
+    viewEndTime.value = Math.min(props.duration, newStartTime + displayDuration);
+    
+    // ヒートマップを更新
+    updateFileAnalysisHeatmap();
+    
+    console.log(`スクロール位置を調整: ${formatTime(viewStartTime.value)} - ${formatTime(viewEndTime.value)}`);
+  }
+};
 
 // 外部に公開するメソッド
 defineExpose({
-  resetHeatmap
+  resetHeatmap,
+  adjustScrollToPlaybackTime
 });
 </script>
 
 <style scoped>
+.heatmap-container {
+  width: 100%;
+  position: relative;
+}
+
 .canvas-wrapper {
   width: 100%;
   border-radius: 8px;
@@ -494,5 +665,9 @@ canvas {
   width: 100%;
   height: auto;
   display: block;
+}
+
+.scroll-controls {
+  padding: 0 8px;
 }
 </style>
