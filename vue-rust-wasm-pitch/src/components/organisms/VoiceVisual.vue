@@ -9,6 +9,10 @@
         <v-icon start>mdi-file-music</v-icon>
         ファイル入力
       </v-tab>
+      <v-tab value="voicetype">
+        <v-icon start>mdi-account-voice</v-icon>
+        ボイスタイプ分析
+      </v-tab>
     </v-tabs>
 
     <v-window v-model="activeTab">
@@ -45,6 +49,20 @@
       <!-- ファイル入力タブ -->
       <v-window-item value="file">
         <AudioFileUploader
+          @audio-loaded="handleAudioFileLoaded"
+          @analysis-requested="analyzeAudioFile"
+          @playback-started="handlePlaybackStarted"
+          @playback-time-updated="handlePlaybackTimeUpdated"
+          @playback-ended="handlePlaybackEnded"
+          @playback-stopped="handlePlaybackStopped"
+          @seek-to-time="handleSeekToTime"
+          :analysis-completed="analysisCompleted"
+        />
+      </v-window-item>
+      
+      <!-- ボイスタイプ分析タブ -->
+      <v-window-item value="voicetype">
+        <VoiceTypeUploader
           @audio-loaded="handleAudioFileLoaded"
           @analysis-requested="analyzeAudioFile"
           @playback-started="handlePlaybackStarted"
@@ -130,6 +148,7 @@ import { audioService, pitchDetectionService } from "../../services";
 import RealtimeHeatMapCanvas from "../atoms/RealtimeHeatMapCanvas.vue";
 import FileHeatMapCanvas from "../atoms/FileHeatMapCanvas.vue";
 import AudioFileUploader from "../molecules/AudioFileUploader.vue";
+import VoiceTypeUploader from "../molecules/VoiceTypeUploader.vue";
 import fourierTransform from "fourier-transform";
 const activeTab = ref<string>("microphone");
 const currentPitch = ref<number>(0);
