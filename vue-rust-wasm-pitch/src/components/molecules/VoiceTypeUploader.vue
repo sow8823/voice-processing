@@ -20,6 +20,16 @@
           @update:model-value="handleFileChange"
         ></v-file-input>
         
+        <v-select
+          v-model="selectedNote"
+          :items="noteOptions"
+          label="分析対象の音高を選択"
+          prepend-icon="mdi-music-note"
+          hint="歌っている音高を選択してください"
+          persistent-hint
+          class="mt-2"
+        ></v-select>
+        
         <div v-if="audioUrl" class="audio-player-container">
           <v-card variant="outlined" class="pa-4">
             <div class="d-flex align-center mb-2">
@@ -109,7 +119,7 @@ import { ref, onUnmounted, onMounted, watch } from 'vue';
 // イベント
 const emit = defineEmits<{
   (e: 'audio-loaded', audioBuffer: AudioBuffer): void;
-  (e: 'analysis-requested', audioBuffer: AudioBuffer): void;
+  (e: 'analysis-requested', audioBuffer: AudioBuffer, selectedNote: string): void;
   (e: 'playback-started', currentTime: number): void;
   (e: 'playback-ended'): void;
   (e: 'playback-stopped'): void;
@@ -134,6 +144,35 @@ const isLoading = ref<boolean>(false);
 const isAnalyzed = ref<boolean>(false);
 const sliderPosition = ref<number>(0); // スライダーの位置（120分割/秒）
 const animationFrameId = ref<number | null>(null); // アニメーションフレームID
+const selectedNote = ref<string>("A4"); // デフォルトはA4
+const noteOptions = [
+  // A3 (57) から A5 (81) までの音高と周波数のマッピング
+  { title: "A3 (220.00 Hz)", value: "A3" },
+  { title: "A#3 (233.08 Hz)", value: "A#3" },
+  { title: "B3 (246.94 Hz)", value: "B3" },
+  { title: "C4 (261.63 Hz)", value: "C4" },
+  { title: "C#4 (277.18 Hz)", value: "C#4" },
+  { title: "D4 (293.66 Hz)", value: "D4" },
+  { title: "D#4 (311.13 Hz)", value: "D#4" },
+  { title: "E4 (329.63 Hz)", value: "E4" },
+  { title: "F4 (349.23 Hz)", value: "F4" },
+  { title: "F#4 (369.99 Hz)", value: "F#4" },
+  { title: "G4 (392.00 Hz)", value: "G4" },
+  { title: "G#4 (415.30 Hz)", value: "G#4" },
+  { title: "A4 (440.00 Hz)", value: "A4" },
+  { title: "A#4 (466.16 Hz)", value: "A#4" },
+  { title: "B4 (493.88 Hz)", value: "B4" },
+  { title: "C5 (523.25 Hz)", value: "C5" },
+  { title: "C#5 (554.37 Hz)", value: "C#5" },
+  { title: "D5 (587.33 Hz)", value: "D5" },
+  { title: "D#5 (622.25 Hz)", value: "D#5" },
+  { title: "E5 (659.25 Hz)", value: "E5" },
+  { title: "F5 (698.46 Hz)", value: "F5" },
+  { title: "F#5 (739.99 Hz)", value: "F#5" },
+  { title: "G5 (783.99 Hz)", value: "G5" },
+  { title: "G#5 (830.61 Hz)", value: "G#5" },
+  { title: "A5 (880.00 Hz)", value: "A5" }
+];
 const analysisData = ref<{
   pitchData: number[];
   frequencyData: Uint8Array[];
@@ -203,9 +242,10 @@ const analyzeAudio = async () => {
   
   try {
     console.log('音声ファイルの分析を開始します');
+    console.log(`選択された音高: ${selectedNote.value}`);
     
-    // 分析リクエストを発火
-    emit('analysis-requested', audioBuffer.value);
+    // 分析リクエストを発火（選択された音高の情報も渡す）
+    emit('analysis-requested', audioBuffer.value, selectedNote.value);
     
     // 注意: 分析完了フラグは親コンポーネントから通知される
   } catch (error) {

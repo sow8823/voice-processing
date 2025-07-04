@@ -41,7 +41,13 @@ import { frequencyAnalysisService } from "../../services";
 const canvasWidth = 800;
 const canvasHeight = 300;
 
-const props = defineProps<{ frequencyData: Uint8Array; baseFrequency: number }>();
+const props = defineProps<{
+  frequencyData: Uint8Array;
+  baseFrequency: number;
+  detectedBaseFrequency?: number;
+  detectedHarmonic2Frequency?: number;
+  detectedHarmonic3Frequency?: number;
+}>();
 const spectrumCanvas = ref<HTMLCanvasElement | null>(null);
 const sampleRate = 44100; // サンプリング周波数、今回は基本的な値として 44100Hz を使用
 const theme = useTheme();
@@ -115,9 +121,15 @@ const drawFrequencySpectrum = (frequencyData: Uint8Array) => {
     
     if (props.baseFrequency > 50) {
       const fftSize = props.frequencyData.length * 2;
-      const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
-      const harmonic2Idx = getFrequencyIndex(props.baseFrequency * 2, sampleRate, fftSize);
-      const harmonic3Idx = getFrequencyIndex(props.baseFrequency * 3, sampleRate, fftSize);
+      
+      // 検出された基音成分と倍音成分の周波数を使用（指定されていない場合は従来の計算方法を使用）
+      const baseFrequency = props.detectedBaseFrequency || props.baseFrequency;
+      const harmonic2Frequency = props.detectedHarmonic2Frequency || (props.baseFrequency * 2);
+      const harmonic3Frequency = props.detectedHarmonic3Frequency || (props.baseFrequency * 3);
+      
+      const baseIdx = getFrequencyIndex(baseFrequency, sampleRate, fftSize);
+      const harmonic2Idx = getFrequencyIndex(harmonic2Frequency, sampleRate, fftSize);
+      const harmonic3Idx = getFrequencyIndex(harmonic3Frequency, sampleRate, fftSize);
       
       baseFreqX = (baseIdx / filteredData.length) * width;
       harmonic2X = (harmonic2Idx / filteredData.length) * width;
@@ -167,10 +179,15 @@ const drawFrequencySpectrum = (frequencyData: Uint8Array) => {
     
     // 基本周波数と倍音の位置にマーカーを表示
     if (props.baseFrequency > 50) {
+      // 検出された周波数を表示用のラベルに追加
+      const baseFrequency = props.detectedBaseFrequency || props.baseFrequency;
+      const harmonic2Frequency = props.detectedHarmonic2Frequency || (props.baseFrequency * 2);
+      const harmonic3Frequency = props.detectedHarmonic3Frequency || (props.baseFrequency * 3);
+      
       const positions = [
-        { x: baseFreqX, label: '基本' },
-        { x: harmonic2X, label: '2倍音' },
-        { x: harmonic3X, label: '3倍音' }
+        { x: baseFreqX, label: `基本 (${Math.round(baseFrequency)}Hz)` },
+        { x: harmonic2X, label: `2倍音 (${Math.round(harmonic2Frequency)}Hz)` },
+        { x: harmonic3X, label: `3倍音 (${Math.round(harmonic3Frequency)}Hz)` }
       ];
       
       positions.forEach(pos => {
@@ -201,9 +218,12 @@ const getFrequencyIndex = (freq: number, sampleRate: number, fftSize: number) =>
 
 // 倍音分析の結果を計算
 const harmonicAnalysis = computed(() => {
+  // 検出された基音成分の周波数を使用（指定されていない場合は従来の計算方法を使用）
+  const baseFrequency = props.detectedBaseFrequency || props.baseFrequency;
+  
   return frequencyAnalysisService.analyzeHarmonics(
     props.frequencyData,
-    props.baseFrequency,
+    baseFrequency,
     44100 // サンプリングレート
   );
 });

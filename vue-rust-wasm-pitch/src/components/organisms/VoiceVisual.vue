@@ -72,6 +72,174 @@
           @seek-to-time="handleSeekToTime"
           :analysis-completed="analysisCompleted"
         />
+        
+        <!-- ボイスタイプ分析結果表示 -->
+        <v-card v-if="voiceTypeAnalysisResult && activeTab === 'voicetype'" class="mt-6">
+          <v-card-title class="text-center text-h5">
+            <v-icon start icon="mdi-account-voice" class="mr-2"></v-icon>
+            ボイスタイプ分析結果
+          </v-card-title>
+          
+          <v-card-text>
+            <v-row>
+              <!-- 声質タイプの表示 -->
+              <v-col cols="12" class="text-center">
+                <div class="mb-2">
+                  <v-chip
+                    size="small"
+                    color="primary"
+                    class="mb-2"
+                  >
+                    <v-icon start>mdi-music-note</v-icon>
+                    <span>分析音高: {{ selectedNote }} ({{ noteFrequencyMap[selectedNote] }} Hz)</span>
+                  </v-chip>
+                </div>
+                
+                <v-chip
+                  size="x-large"
+                  :color="voiceTypeAnalysisResult.voiceType === 'lightChest' ? 'light-blue' : 'deep-purple'"
+                  class="pa-4 mb-4"
+                >
+                  <v-icon start>{{ voiceTypeAnalysisResult.voiceType === 'lightChest' ? 'mdi-air' : 'mdi-weight-lifter' }}</v-icon>
+                  <span class="text-h6">{{ voiceTypeAnalysisResult.voiceType === 'lightChest' ? 'ライトチェスト' : 'プル' }}</span>
+                </v-chip>
+                
+                <!-- 確信度表示 -->
+                <div class="mt-2">
+                  <span class="text-subtitle-1">確信度: {{ Math.round(voiceTypeAnalysisResult.confidence * 100) }}%</span>
+                  <v-progress-linear
+                    :model-value="voiceTypeAnalysisResult.confidence * 100"
+                    :color="voiceTypeAnalysisResult.voiceType === 'lightChest' ? 'light-blue' : 'deep-purple'"
+                    height="10"
+                    rounded
+                    class="mt-2"
+                  ></v-progress-linear>
+                </div>
+              </v-col>
+              
+              <!-- パラメータ表示 -->
+              <v-col cols="12" md="6">
+                <v-card variant="outlined" class="pa-4">
+                  <v-card-title class="text-subtitle-1">
+                    <v-icon start>mdi-chart-bar</v-icon>
+                    分析パラメータ
+                  </v-card-title>
+                  
+                  <v-list>
+                    <v-list-item>
+                      <template v-slot:prepend>
+                        <v-icon>mdi-sine-wave</v-icon>
+                      </template>
+                      <v-list-item-title>第2倍音/基本周波数比率</v-list-item-title>
+                      <v-list-item-subtitle>
+                        {{ Math.round(voiceTypeAnalysisResult.parameters.harmonic2Ratio) }}%
+                        <v-progress-linear
+                          :model-value="Math.min(100, voiceTypeAnalysisResult.parameters.harmonic2Ratio)"
+                          color="primary"
+                          height="5"
+                          class="mt-1"
+                        ></v-progress-linear>
+                      </v-list-item-subtitle>
+                    </v-list-item>
+                    
+                    <v-list-item>
+                      <template v-slot:prepend>
+                        <v-icon>mdi-sine-wave</v-icon>
+                      </template>
+                      <v-list-item-title>第3倍音/基本周波数比率</v-list-item-title>
+                      <v-list-item-subtitle>
+                        {{ Math.round(voiceTypeAnalysisResult.parameters.harmonic3Ratio) }}%
+                        <v-progress-linear
+                          :model-value="Math.min(100, voiceTypeAnalysisResult.parameters.harmonic3Ratio)"
+                          color="primary"
+                          height="5"
+                          class="mt-1"
+                        ></v-progress-linear>
+                      </v-list-item-subtitle>
+                    </v-list-item>
+                    
+                    <v-list-item>
+                      <template v-slot:prepend>
+                        <v-icon>mdi-chart-bell-curve</v-icon>
+                      </template>
+                      <v-list-item-title>高周波数帯域エネルギー比率</v-list-item-title>
+                      <v-list-item-subtitle>
+                        {{ Math.round(voiceTypeAnalysisResult.parameters.highFrequencyRatio * 100) }}%
+                        <v-progress-linear
+                          :model-value="voiceTypeAnalysisResult.parameters.highFrequencyRatio * 100"
+                          color="primary"
+                          height="5"
+                          class="mt-1"
+                        ></v-progress-linear>
+                      </v-list-item-subtitle>
+                    </v-list-item>
+                    
+                    <v-list-item>
+                      <template v-slot:prepend>
+                        <v-icon>mdi-waveform</v-icon>
+                      </template>
+                      <v-list-item-title>ノイズ成分の割合</v-list-item-title>
+                      <v-list-item-subtitle>
+                        {{ Math.round(voiceTypeAnalysisResult.parameters.noiseRatio * 100) }}%
+                        <v-progress-linear
+                          :model-value="voiceTypeAnalysisResult.parameters.noiseRatio * 100"
+                          color="primary"
+                          height="5"
+                          class="mt-1"
+                        ></v-progress-linear>
+                      </v-list-item-subtitle>
+                    </v-list-item>
+                  </v-list>
+                </v-card>
+              </v-col>
+              
+              <!-- 判定基準の説明 -->
+              <v-col cols="12" md="6">
+                <v-card variant="outlined" class="pa-4">
+                  <v-card-title class="text-subtitle-1">
+                    <v-icon start>mdi-information-outline</v-icon>
+                    ボイスタイプの特徴
+                  </v-card-title>
+                  
+                  <v-tabs v-model="voiceTypeInfoTab">
+                    <v-tab value="lightChest">ライトチェスト</v-tab>
+                    <v-tab value="pull">プル</v-tab>
+                  </v-tabs>
+                  
+                  <v-window v-model="voiceTypeInfoTab" class="mt-2">
+                    <v-window-item value="lightChest">
+                      <v-list>
+                        <v-list-item>
+                          <v-list-item-title>息漏れが多い</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>基本周波数の振幅が他の倍音成分と比べて大きい</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>高周波数帯域のエネルギーが比較的少ない</v-list-item-title>
+                        </v-list-item>
+                      </v-list>
+                    </v-window-item>
+                    
+                    <v-window-item value="pull">
+                      <v-list>
+                        <v-list-item>
+                          <v-list-item-title>地声感が強い</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>倍音成分が基本周波数成分と同等以上の大きさがみられる</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>高周波数帯域にもエネルギーが分布している</v-list-item-title>
+                        </v-list-item>
+                      </v-list>
+                    </v-window-item>
+                  </v-window>
+                </v-card>
+              </v-col>
+            </v-row>
+          </v-card-text>
+        </v-card>
       </v-window-item>
     </v-window>
 
@@ -132,7 +300,13 @@
             周波数スペクトル
           </v-card-title>
           <v-card-text>
-            <SpectrumCanvas :frequencyData="frequencyData" :base-frequency="currentPitch" />
+            <SpectrumCanvas
+              :frequencyData="frequencyData"
+              :base-frequency="currentPitch"
+              :detectedBaseFrequency="detectedBaseFrequency"
+              :detectedHarmonic2Frequency="detectedHarmonic2Frequency"
+              :detectedHarmonic3Frequency="detectedHarmonic3Frequency"
+            />
           </v-card-text>
         </v-card>
       </v-col>
@@ -144,12 +318,13 @@
 import { ref, onUnmounted, watch } from "vue";
 import PitchCanvas from "../atoms/PitchCanvas.vue";
 import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
-import { audioService, pitchDetectionService } from "../../services";
+import { audioService, pitchDetectionService, voiceTypeAnalysisService } from "../../services";
 import RealtimeHeatMapCanvas from "../atoms/RealtimeHeatMapCanvas.vue";
 import FileHeatMapCanvas from "../atoms/FileHeatMapCanvas.vue";
 import AudioFileUploader from "../molecules/AudioFileUploader.vue";
 import VoiceTypeUploader from "../molecules/VoiceTypeUploader.vue";
 import fourierTransform from "fourier-transform";
+import type { VoiceTypeAnalysisResult } from "../../services/VoiceTypeAnalysisService";
 const activeTab = ref<string>("microphone");
 const currentPitch = ref<number>(0);
 const frequencyData = ref<Uint8Array>(new Uint8Array(1024));
@@ -171,6 +346,50 @@ const analysisData = ref<{
   frequencyData: [],
   timestamps: []
 });
+
+// ボイスタイプ分析結果を保存するための状態
+const voiceTypeAnalysisResult = ref<VoiceTypeAnalysisResult | null>(null);
+
+// ボイスタイプ情報タブの状態
+const voiceTypeInfoTab = ref<string>("lightChest");
+
+// 検出された基音成分と倍音成分の周波数
+const detectedBaseFrequency = ref<number | undefined>(undefined);
+const detectedHarmonic2Frequency = ref<number | undefined>(undefined);
+const detectedHarmonic3Frequency = ref<number | undefined>(undefined);
+
+// 選択された音高の情報
+const selectedNote = ref<string>("A4");
+
+// 音高と周波数のマッピング
+const noteFrequencyMap: Record<string, number> = {
+  // A3 (57) から A5 (81) までの音高と周波数のマッピング
+  "A3": 220.00,
+  "A#3": 233.08,
+  "B3": 246.94,
+  "C4": 261.63,
+  "C#4": 277.18,
+  "D4": 293.66,
+  "D#4": 311.13,
+  "E4": 329.63,
+  "F4": 349.23,
+  "F#4": 369.99,
+  "G4": 392.00,
+  "G#4": 415.30,
+  "A4": 440.00,
+  "A#4": 466.16,
+  "B4": 493.88,
+  "C5": 523.25,
+  "C#5": 554.37,
+  "D5": 587.33,
+  "D#5": 622.25,
+  "E5": 659.25,
+  "F5": 698.46,
+  "F#5": 739.99,
+  "G5": 783.99,
+  "G#5": 830.61,
+  "A5": 880.00
+};
 
 // 現在の再生位置
 const currentPlaybackTime = ref<number>(0);
@@ -334,7 +553,12 @@ const handleAudioFileLoaded = (audioBuffer: AudioBuffer) => {
 };
 
 // ファイルの分析リクエストがあったときの処理
-const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
+const analyzeAudioFile = async (audioBuffer: AudioBuffer, note?: string) => {
+  // 音高が指定されている場合は更新
+  if (note) {
+    selectedNote.value = note;
+    console.log(`選択された音高を更新: ${selectedNote.value} (${noteFrequencyMap[selectedNote.value]} Hz)`);
+  }
   if (!audioBuffer) {
     console.error('音声バッファが空です');
     return;
@@ -348,6 +572,9 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
   
   // 分析完了フラグをリセット
   analysisCompleted.value = false;
+  
+  // ボイスタイプ分析結果をリセット
+  voiceTypeAnalysisResult.value = null;
   
   try {
     // 分析データをリセット
@@ -535,6 +762,63 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer) => {
         fileHeatMapCanvasRef.value.resetHeatmap();
       }
       
+      // ボイスタイプ分析を実行
+      if (activeTab.value === 'voicetype') {
+        console.log(`ボイスタイプ分析を実行します (選択音高: ${selectedNote.value}, ${noteFrequencyMap[selectedNote.value]} Hz)`);
+        
+        try {
+          // 選択された音高の周波数を取得
+          const targetFrequency = noteFrequencyMap[selectedNote.value];
+          
+          // 検出に使用する周波数データと時間位置を特定
+          // 安定した部分（中央付近）のデータを使用
+          const stableIndex = Math.floor(analysisData.value.frequencyData.length / 2);
+          const stableFrequencyData = analysisData.value.frequencyData[stableIndex];
+          
+          // 選択した周波数の±5%以内で最も強いスペクトル成分を見つける（基音）
+          detectedBaseFrequency.value = voiceTypeAnalysisService.findStrongestFrequencyComponent(
+            stableFrequencyData,
+            targetFrequency,
+            sampleRate,
+            0.05 // 5%の範囲
+          );
+          
+          // 選択した周波数の2倍の±5%以内で最も強い成分を見つける（2倍音）
+          detectedHarmonic2Frequency.value = voiceTypeAnalysisService.findStrongestFrequencyComponent(
+            stableFrequencyData,
+            targetFrequency * 2, // 選択した周波数の2倍
+            sampleRate,
+            0.05 // 5%の範囲
+          );
+          
+          // 選択した周波数の3倍の±5%以内で最も強い成分を見つける（3倍音）
+          detectedHarmonic3Frequency.value = voiceTypeAnalysisService.findStrongestFrequencyComponent(
+            stableFrequencyData,
+            targetFrequency * 3, // 選択した周波数の3倍
+            sampleRate,
+            0.05 // 5%の範囲
+          );
+          
+          console.log(`選択周波数: ${targetFrequency.toFixed(2)}Hz`);
+          console.log(`検出された基音成分: ${detectedBaseFrequency.value.toFixed(2)}Hz (選択周波数の±5%以内)`);
+          console.log(`検出された第2倍音成分: ${detectedHarmonic2Frequency.value.toFixed(2)}Hz (選択周波数の2倍の±5%以内)`);
+          console.log(`検出された第3倍音成分: ${detectedHarmonic3Frequency.value.toFixed(2)}Hz (選択周波数の3倍の±5%以内)`);
+          
+          // ボイスタイプ分析を実行（選択された音高の情報を渡す）
+          voiceTypeAnalysisResult.value = voiceTypeAnalysisService.analyzeVoiceType(
+            analysisData.value.frequencyData,
+            analysisData.value.pitchData,
+            analysisData.value.timestamps,
+            sampleRate,
+            targetFrequency
+          );
+          
+          console.log('ボイスタイプ分析結果:', voiceTypeAnalysisResult.value);
+        } catch (error) {
+          console.error('ボイスタイプ分析に失敗しました:', error);
+        }
+      }
+      
       // 分析完了フラグを設定
       analysisCompleted.value = true;
       
@@ -631,9 +915,17 @@ const handlePlaybackStopped = () => {
   frequencyData.value = new Uint8Array(frequencyData.value.length);
 };
 
-// タブ切り替えや新しいファイルがロードされたときに分析完了フラグをリセット
+// タブ切り替えや新しいファイルがロードされたときに分析完了フラグと関連値をリセット
 watch([activeTab, fileAudioBuffer], () => {
   analysisCompleted.value = false;
+  
+  // タブ切り替え時に周波数関連の値をリセット
+  currentPitch.value = 0;
+  detectedBaseFrequency.value = undefined;
+  detectedHarmonic2Frequency.value = undefined;
+  detectedHarmonic3Frequency.value = undefined;
+  
+  console.log('タブ切り替えまたはファイル変更: 分析データと周波数値をリセットしました');
 });
 
 // 現在の再生時間に合わせて表示を更新する関数
