@@ -63,9 +63,9 @@
       <!-- ボイスタイプ分析タブ -->
       <v-window-item value="voicetype">
         <VoiceTypeUploader
-          @audio-loaded="handleAudioFileLoaded"
-          @analysis-requested="analyzeAudioFile"
-          @playback-started="handlePlaybackStarted"
+          @audio-loaded="handleMultipleAudioFilesLoaded"
+          @analysis-requested="analyzeMultipleAudioFiles"
+          @playback-started="handlePitchPlaybackStarted"
           @playback-time-updated="handlePlaybackTimeUpdated"
           @playback-ended="handlePlaybackEnded"
           @playback-stopped="handlePlaybackStopped"
@@ -97,11 +97,11 @@
                 
                 <v-chip
                   size="x-large"
-                  :color="voiceTypeAnalysisResult.voiceType === 'lightChest' ? 'light-blue' : 'deep-purple'"
+                  :color="getVoiceTypeColor(voiceTypeAnalysisResult.voiceType)"
                   class="pa-4 mb-4"
                 >
-                  <v-icon start>{{ voiceTypeAnalysisResult.voiceType === 'lightChest' ? 'mdi-air' : 'mdi-weight-lifter' }}</v-icon>
-                  <span class="text-h6">{{ voiceTypeAnalysisResult.voiceType === 'lightChest' ? 'ライトチェスト' : 'プル' }}</span>
+                  <v-icon start>{{ getVoiceTypeIcon(voiceTypeAnalysisResult.voiceType) }}</v-icon>
+                  <span class="text-h6">{{ getVoiceTypeName(voiceTypeAnalysisResult.voiceType) }}</span>
                 </v-chip>
                 
                 <!-- 確信度表示 -->
@@ -109,7 +109,7 @@
                   <span class="text-subtitle-1">確信度: {{ Math.round(voiceTypeAnalysisResult.confidence * 100) }}%</span>
                   <v-progress-linear
                     :model-value="voiceTypeAnalysisResult.confidence * 100"
-                    :color="voiceTypeAnalysisResult.voiceType === 'lightChest' ? 'light-blue' : 'deep-purple'"
+                    :color="getVoiceTypeColor(voiceTypeAnalysisResult.voiceType)"
                     height="10"
                     rounded
                     class="mt-2"
@@ -189,6 +189,55 @@
                         ></v-progress-linear>
                       </v-list-item-subtitle>
                     </v-list-item>
+
+                    <!-- 新しいパラメータ（存在する場合のみ表示） -->
+                    <v-list-item v-if="voiceTypeAnalysisResult.parameters.voiceConsistency !== undefined">
+                      <template v-slot:prepend>
+                        <v-icon>mdi-tune-vertical</v-icon>
+                      </template>
+                      <v-list-item-title>声質の一貫性</v-list-item-title>
+                      <v-list-item-subtitle>
+                        {{ Math.round(voiceTypeAnalysisResult.parameters.voiceConsistency * 100) }}%
+                        <v-progress-linear
+                          :model-value="voiceTypeAnalysisResult.parameters.voiceConsistency * 100"
+                          color="primary"
+                          height="5"
+                          class="mt-1"
+                        ></v-progress-linear>
+                      </v-list-item-subtitle>
+                    </v-list-item>
+
+                    <v-list-item v-if="voiceTypeAnalysisResult.parameters.voiceQualityChange !== undefined">
+                      <template v-slot:prepend>
+                        <v-icon>mdi-swap-vertical</v-icon>
+                      </template>
+                      <v-list-item-title>声質変化の度合い</v-list-item-title>
+                      <v-list-item-subtitle>
+                        {{ Math.round(voiceTypeAnalysisResult.parameters.voiceQualityChange * 100) }}%
+                        <v-progress-linear
+                          :model-value="voiceTypeAnalysisResult.parameters.voiceQualityChange * 100"
+                          color="primary"
+                          height="5"
+                          class="mt-1"
+                        ></v-progress-linear>
+                      </v-list-item-subtitle>
+                    </v-list-item>
+
+                    <v-list-item v-if="voiceTypeAnalysisResult.parameters.brightness3kHz !== undefined">
+                      <template v-slot:prepend>
+                        <v-icon>mdi-brightness-6</v-icon>
+                      </template>
+                      <v-list-item-title>3kHz周辺の強さ</v-list-item-title>
+                      <v-list-item-subtitle>
+                        {{ Math.round(voiceTypeAnalysisResult.parameters.brightness3kHz * 100) }}%
+                        <v-progress-linear
+                          :model-value="voiceTypeAnalysisResult.parameters.brightness3kHz * 100"
+                          color="primary"
+                          height="5"
+                          class="mt-1"
+                        ></v-progress-linear>
+                      </v-list-item-subtitle>
+                    </v-list-item>
                   </v-list>
                 </v-card>
               </v-col>
@@ -204,6 +253,8 @@
                   <v-tabs v-model="voiceTypeInfoTab">
                     <v-tab value="lightChest">ライトチェスト</v-tab>
                     <v-tab value="pull">プル</v-tab>
+                    <v-tab value="flip">フリップ</v-tab>
+                    <v-tab value="mixed">ミックス</v-tab>
                   </v-tabs>
                   
                   <v-window v-model="voiceTypeInfoTab" class="mt-2">
@@ -231,6 +282,40 @@
                         </v-list-item>
                         <v-list-item>
                           <v-list-item-title>高周波数帯域にもエネルギーが分布している</v-list-item-title>
+                        </v-list-item>
+                      </v-list>
+                    </v-window-item>
+
+                    <v-window-item value="flip">
+                      <v-list>
+                        <v-list-item>
+                          <v-list-item-title>低音と高音の間で声質が著しく変化する</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>低音では倍音が豊かで声量が大きい</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>高音では基音優位になり声量が小さくなる</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>特定の音程で声質が急激に変化する（ヨーデル的特徴）</v-list-item-title>
+                        </v-list-item>
+                      </v-list>
+                    </v-window-item>
+
+                    <v-window-item value="mixed">
+                      <v-list>
+                        <v-list-item>
+                          <v-list-item-title>低音から高音まで声質の変化が少ない</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>全体的に声量が大きい</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>倍音成分が豊か</v-list-item-title>
+                        </v-list-item>
+                        <v-list-item>
+                          <v-list-item-title>3kHz周辺の周波数成分が強く、明るく響く声</v-list-item-title>
                         </v-list-item>
                       </v-list>
                     </v-window-item>
@@ -318,13 +403,14 @@
 import { ref, onUnmounted, watch } from "vue";
 import PitchCanvas from "../atoms/PitchCanvas.vue";
 import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
-import { audioService, pitchDetectionService, voiceTypeAnalysisService } from "../../services";
+import { audioService, pitchDetectionService } from "../../services";
+import { VoiceTypeAnalysisService } from "../../services/VoiceTypeAnalysisService";
 import RealtimeHeatMapCanvas from "../atoms/RealtimeHeatMapCanvas.vue";
 import FileHeatMapCanvas from "../atoms/FileHeatMapCanvas.vue";
 import AudioFileUploader from "../molecules/AudioFileUploader.vue";
 import VoiceTypeUploader from "../molecules/VoiceTypeUploader.vue";
 import fourierTransform from "fourier-transform";
-import type { VoiceTypeAnalysisResult } from "../../services/VoiceTypeAnalysisService";
+import type { VoiceTypeAnalysisResult, VoiceType } from "../../services/VoiceTypeAnalysisService";
 const activeTab = ref<string>("microphone");
 const currentPitch = ref<number>(0);
 const frequencyData = ref<Uint8Array>(new Uint8Array(1024));
@@ -411,8 +497,201 @@ watch(activeTab, (newTab, oldTab) => {
   resetData();
 });
 
+// ボイスタイプ分析サービスのインスタンスを作成
+const voiceTypeAnalysisService = new VoiceTypeAnalysisService();
+
+// 複数の音声ファイルがロードされたときのハンドラ
+const handleMultipleAudioFilesLoaded = (audioBuffers: Record<string, AudioBuffer>) => {
+  console.log('複数の音声ファイルがロードされました:', Object.keys(audioBuffers));
+  
+  // 最初の音声バッファをfileAudioBufferに設定（表示用）
+  const firstKey = Object.keys(audioBuffers)[0];
+  if (firstKey) {
+    fileAudioBuffer.value = audioBuffers[firstKey];
+  }
+};
+
+// 複数の音声ファイルを分析するハンドラ
+const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffer>, gender: string) => {
+  console.log(`複数の音声ファイルの分析を開始します (性別: ${gender})`);
+  
+  try {
+    // 分析中フラグを設定
+    isLoading.value = true;
+    analysisCompleted.value = false;
+    
+    // 各音声ファイルの周波数データとピッチデータを取得
+    const frequencyDataArrays: Record<string, Uint8Array[]> = {};
+    const pitchDataArrays: Record<string, number[]> = {};
+    const timestampsArrays: Record<string, number[]> = {};
+    
+    // 各音声ファイルを処理
+    for (const [pitchId, buffer] of Object.entries(audioBuffers)) {
+      const { frequencyDataArray, pitchDataArray, timestamps } = await processAudioBuffer(buffer);
+      
+      frequencyDataArrays[pitchId] = frequencyDataArray;
+      pitchDataArrays[pitchId] = pitchDataArray;
+      timestampsArrays[pitchId] = timestamps;
+      
+      // 最初の音声ファイルの分析データを表示用に設定
+      if (Object.keys(frequencyDataArrays).length === 1) {
+        analysisData.value = {
+          frequencyData: frequencyDataArray,
+          pitchData: pitchDataArray,
+          timestamps
+        };
+      }
+    }
+    
+    // サンプリングレートを取得（最初の音声ファイルから）
+    const firstBuffer = audioBuffers[Object.keys(audioBuffers)[0]];
+    const sampleRate = firstBuffer ? firstBuffer.sampleRate : 44100;
+    
+    // ボイスタイプ分析を実行
+    const result = voiceTypeAnalysisService.analyzeMultiplePitches(
+      frequencyDataArrays,
+      pitchDataArrays,
+      timestampsArrays,
+      sampleRate,
+      gender as 'male' | 'female'
+    );
+    
+    // 分析結果を設定
+    voiceTypeAnalysisResult.value = result;
+    
+    // 分析完了フラグを設定
+    analysisCompleted.value = true;
+    
+    console.log('ボイスタイプ分析が完了しました:', result.voiceType);
+  } catch (error) {
+    console.error('音声分析中にエラーが発生しました:', error);
+    alert('音声分析に失敗しました。');
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+// 特定の音程の再生が開始されたときのハンドラ
+const handlePitchPlaybackStarted = (pitchId: string, currentTime: number) => {
+  console.log(`音程 ${pitchId} の再生が開始されました (${currentTime}秒)`);
+  
+  // 再生中フラグは VoiceTypeUploader コンポーネント内で管理されるため、ここでは設定しない
+  
+  // 現在の再生位置を更新
+  currentPlaybackTime.value = currentTime;
+};
+
+// 音声バッファを処理して周波数データとピッチデータを取得する関数
+const processAudioBuffer = async (buffer: AudioBuffer): Promise<{
+  frequencyData: Uint8Array;
+  frequencyDataArray: Uint8Array[];
+  pitchDataArray: number[];
+  timestamps: number[];
+}> => {
+  // 処理結果を格納する配列
+  const frequencyDataArray: Uint8Array[] = [];
+  const pitchDataArray: number[] = [];
+  const timestamps: number[] = [];
+  
+  // バッファからデータを取得
+  const audioData = buffer.getChannelData(0);
+  const sampleRate = buffer.sampleRate;
+  
+  // 分析フレームサイズとホップサイズを設定
+  const frameSize = 2048;
+  const hopSize = 1024;
+  
+  // 各フレームを処理
+  for (let i = 0; i < audioData.length - frameSize; i += hopSize) {
+    // フレームを抽出
+    const frame = audioData.slice(i, i + frameSize);
+    
+    // ピッチを検出
+    const pitch = pitchDetectionService.detectPitch(
+      new Float32Array(frame),
+      sampleRate,
+      { powerThreshold: 0.001, clarityThreshold: 0.7 }
+    );
+    
+    // 周波数データを計算
+    const fftResult = fourierTransform(frame);
+    const frequencyData = new Uint8Array(fftResult.length);
+    
+    // FFT結果を0-255の範囲にスケーリング
+    for (let j = 0; j < fftResult.length; j++) {
+      frequencyData[j] = Math.min(255, Math.max(0, Math.floor(fftResult[j] * 5000)));
+    }
+    
+    // 結果を配列に追加
+    frequencyDataArray.push(frequencyData);
+    pitchDataArray.push(pitch);
+    timestamps.push(i / sampleRate);
+  }
+  
+  // 最初のフレームの周波数データを返す（表示用）
+  const firstFrameData = frequencyDataArray.length > 0
+    ? frequencyDataArray[0]
+    : new Uint8Array(1024);
+    
+  return {
+    frequencyData: firstFrameData,
+    frequencyDataArray: frequencyDataArray,
+    pitchDataArray: pitchDataArray,
+    timestamps: timestamps
+  };
+};
+
+// ボイスタイプに応じた色を返す関数
+const getVoiceTypeColor = (voiceType: VoiceType): string => {
+  switch (voiceType) {
+    case 'lightChest':
+      return 'light-blue';
+    case 'pull':
+      return 'deep-purple';
+    case 'flip':
+      return 'amber-darken-2';
+    case 'mixed':
+      return 'green';
+    default:
+      return 'grey';
+  }
+};
+
+// ボイスタイプに応じたアイコンを返す関数
+const getVoiceTypeIcon = (voiceType: VoiceType): string => {
+  switch (voiceType) {
+    case 'lightChest':
+      return 'mdi-air';
+    case 'pull':
+      return 'mdi-weight-lifter';
+    case 'flip':
+      return 'mdi-swap-vertical';
+    case 'mixed':
+      return 'mdi-tune-vertical';
+    default:
+      return 'mdi-help-circle';
+  }
+};
+
+// ボイスタイプに応じた日本語名を返す関数
+const getVoiceTypeName = (voiceType: VoiceType): string => {
+  switch (voiceType) {
+    case 'lightChest':
+      return 'ライトチェスト';
+    case 'pull':
+      return 'プル';
+    case 'flip':
+      return 'フリップ';
+    case 'mixed':
+      return 'ミックス';
+    default:
+      return '不明';
+  }
+};
+
 // データをリセットする関数
 const resetData = () => {
+
   currentPitch.value = 0;
   frequencyData.value = new Uint8Array(1024);
 };
@@ -800,9 +1079,9 @@ const analyzeAudioFile = async (audioBuffer: AudioBuffer, note?: string) => {
           );
           
           console.log(`選択周波数: ${targetFrequency.toFixed(2)}Hz`);
-          console.log(`検出された基音成分: ${detectedBaseFrequency.value.toFixed(2)}Hz (選択周波数の±5%以内)`);
-          console.log(`検出された第2倍音成分: ${detectedHarmonic2Frequency.value.toFixed(2)}Hz (選択周波数の2倍の±5%以内)`);
-          console.log(`検出された第3倍音成分: ${detectedHarmonic3Frequency.value.toFixed(2)}Hz (選択周波数の3倍の±5%以内)`);
+          console.log(`検出された基音成分: ${detectedBaseFrequency.value?.toFixed(2) || 'N/A'}Hz (選択周波数の±5%以内)`);
+          console.log(`検出された第2倍音成分: ${detectedHarmonic2Frequency.value?.toFixed(2) || 'N/A'}Hz (選択周波数の2倍の±5%以内)`);
+          console.log(`検出された第3倍音成分: ${detectedHarmonic3Frequency.value?.toFixed(2) || 'N/A'}Hz (選択周波数の3倍の±5%以内)`);
           
           // ボイスタイプ分析を実行（選択された音高の情報を渡す）
           voiceTypeAnalysisResult.value = voiceTypeAnalysisService.analyzeVoiceType(

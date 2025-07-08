@@ -1,112 +1,120 @@
 <template>
-  <div class="audio-file-uploader">
+  <div class="voice-type-uploader">
     <v-card class="mb-6">
       <v-card-title class="text-center text-h5">
-        <v-icon start icon="mdi-file-upload" class="mr-2"></v-icon>
-        音声ファイルのアップロード
+        <v-icon start icon="mdi-account-voice" class="mr-2"></v-icon>
+        ボイスタイプ診断
       </v-card-title>
       <v-card-subtitle class="text-center">
-        MP3またはWAVファイルをアップロードして分析します
+        指定された3つの音程で発声した音声をアップロードして分析します
       </v-card-subtitle>
       
       <v-card-text>
-        <v-file-input
-          v-model="audioFile"
-          accept="audio/mp3,audio/wav"
-          label="音声ファイルを選択"
-          prepend-icon="mdi-music"
-          show-size
-          :rules="[rules.required, rules.fileType]"
-          @update:model-value="handleFileChange"
-        ></v-file-input>
+        <!-- 性別選択 -->
+        <v-card variant="outlined" class="mb-4 pa-4">
+          <v-card-title class="text-subtitle-1">
+            <v-icon start icon="mdi-gender-male-female" class="mr-2"></v-icon>
+            性別を選択
+          </v-card-title>
+          <v-radio-group v-model="gender" inline>
+            <v-radio label="男性" value="male"></v-radio>
+            <v-radio label="女性" value="female"></v-radio>
+          </v-radio-group>
+        </v-card>
         
-        <v-select
-          v-model="selectedNote"
-          :items="noteOptions"
-          label="分析対象の音高を選択"
-          prepend-icon="mdi-music-note"
-          hint="歌っている音高を選択してください"
-          persistent-hint
-          class="mt-2"
-        ></v-select>
+        <!-- 音程ガイド -->
+        <v-card variant="outlined" class="mb-4 pa-4">
+          <v-card-title class="text-subtitle-1">
+            <v-icon start icon="mdi-music-note" class="mr-2"></v-icon>
+            診断用音程ガイド
+          </v-card-title>
+          <v-card-text>
+            <p class="text-body-2 mb-4">
+              {{ gender === 'male' ? '男性' : '女性' }}用の3つの音程で発声した音声をそれぞれアップロードしてください。
+              参考音ボタンを押すと、その音程の音が再生されます。
+            </p>
+            
+            <v-list>
+              <v-list-item v-for="(pitch, index) in pitchSet" :key="index">
+                <template v-slot:prepend>
+                  <v-icon icon="mdi-music-note"></v-icon>
+                </template>
+                <v-list-item-title>{{ pitch.name }} ({{ pitch.frequency }} Hz)</v-list-item-title>
+                <template v-slot:append>
+                  <v-btn
+                    icon="mdi-play"
+                    size="small"
+                    color="primary"
+                    variant="tonal"
+                    @click="playReferenceTone(pitch.frequency)"
+                    :title="`${pitch.name}の参考音を再生`"
+                  ></v-btn>
+                </template>
+              </v-list-item>
+            </v-list>
+          </v-card-text>
+        </v-card>
         
-        <div v-if="audioUrl" class="audio-player-container">
-          <v-card variant="outlined" class="pa-4">
+        <!-- 音声アップロードセクション -->
+        <v-card v-for="(pitch, index) in pitchSet" :key="index" variant="outlined" class="mb-4 pa-4">
+          <v-card-title class="text-subtitle-1">
+            <v-icon start icon="mdi-file-upload" class="mr-2"></v-icon>
+            {{ pitch.name }} の音声をアップロード
+          </v-card-title>
+          
+          <v-file-input
+            v-model="audioFiles[pitch.id]"
+            accept="audio/mp3,audio/wav"
+            :label="`${pitch.name} の音声ファイルを選択`"
+            prepend-icon="mdi-music"
+            show-size
+            :rules="[rules.fileType]"
+            @update:model-value="(file) => handleFileChange(file as File | null, pitch.id)"
+            class="mb-2"
+          ></v-file-input>
+          
+          <div v-if="audioUrls[pitch.id]" class="audio-player-container">
             <div class="d-flex align-center mb-2">
               <v-icon icon="mdi-music-note" class="mr-2"></v-icon>
-              <span class="text-subtitle-1">{{ audioFile?.name }}</span>
+              <span class="text-subtitle-2">{{ audioFiles[pitch.id]?.name }}</span>
             </div>
             
             <audio
-              ref="audioPlayer"
+              :ref="el => setAudioPlayerRef(el as HTMLAudioElement | null, pitch.id)"
               class="w-100"
-              :src="audioUrl"
-              :disabled="true"
-              @loadedmetadata="handleAudioLoaded"
+              :src="audioUrls[pitch.id] || undefined"
+              controls
+              @loadedmetadata="(event) => handleAudioLoaded(event, pitch.id)"
             ></audio>
             
-            <div v-if="isAnalyzed && audioBuffer" class="time-slider-container mt-3">
-              <div class="d-flex justify-space-between mb-1">
-                <span class="text-caption">{{ formatTime(0) }}</span>
-                <span class="text-caption">{{ formatTime(audioBuffer.duration) }}</span>
-              </div>
-              <v-slider
-                v-model="sliderPosition"
-                :min="0"
-                :max="Math.ceil(audioBuffer.duration * 120)"
-                :step="1"
-                hide-details
-                density="compact"
-                color="primary"
-                track-color="grey-darken-1"
-                @update:model-value="handleSliderChange"
-                :disabled="!isAnalyzed"
-              >
-                <template v-slot:prepend>
-                  <v-icon size="small">mdi-clock-outline</v-icon>
-                </template>
-                <template v-slot:append>
-                  <span class="text-caption">{{ formatTime(sliderPosition / 120) }}</span>
-                </template>
-              </v-slider>
-              <div class="text-caption text-center mt-1">
-                1秒 = 120分割 (8.33ms/分割)
-              </div>
-            </div>
-            
-            <div class="d-flex justify-space-between align-center mt-4">
-              <v-btn
-                color="info"
-                prepend-icon="mdi-waveform"
-                @click="analyzeAudio"
-                :disabled="!audioUrl || isPlaying || isAnalyzing"
-                :loading="isAnalyzing"
-                class="mr-2"
-              >
-                分析
-              </v-btn>
-              
-              <v-btn
-                :color="isPlaying ? 'error' : 'primary'"
-                :prepend-icon="isPlaying ? 'mdi-stop' : 'mdi-play'"
-                @click="togglePlayback"
-                :disabled="!audioUrl || !isAnalyzed"
-                :loading="isLoading"
-              >
-                {{ isPlaying ? '停止' : '再生' }}
-              </v-btn>
-              
+            <div class="d-flex justify-end mt-2">
               <v-btn
                 color="error"
                 variant="outlined"
+                size="small"
                 prepend-icon="mdi-delete"
-                @click="clearAudio"
-                :disabled="!audioUrl || isPlaying"
+                @click="() => clearAudio(pitch.id)"
+                :disabled="isPlaying[pitch.id]"
               >
                 クリア
               </v-btn>
             </div>
-          </v-card>
+          </div>
+        </v-card>
+        
+        <!-- 分析ボタン -->
+        <div class="d-flex justify-center mt-6">
+          <v-btn
+            color="primary"
+            size="large"
+            prepend-icon="mdi-waveform"
+            @click="analyzeAudio"
+            :disabled="!allPitchesUploaded || isAnalyzing"
+            :loading="isAnalyzing"
+            class="px-8"
+          >
+            ボイスタイプを分析
+          </v-btn>
         </div>
       </v-card-text>
     </v-card>
@@ -114,17 +122,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted, onMounted, watch } from 'vue';
+import { ref, computed, onUnmounted, onMounted, watch } from 'vue';
 
 // イベント
 const emit = defineEmits<{
-  (e: 'audio-loaded', audioBuffer: AudioBuffer): void;
-  (e: 'analysis-requested', audioBuffer: AudioBuffer, selectedNote: string): void;
-  (e: 'playback-started', currentTime: number): void;
-  (e: 'playback-ended'): void;
-  (e: 'playback-stopped'): void;
-  (e: 'playback-time-updated', currentTime: number): void;
-  (e: 'seek-to-time', seekTime: number): void;
+  (e: 'audio-loaded', audioBuffers: Record<string, AudioBuffer>): void;
+  (e: 'analysis-requested', audioBuffers: Record<string, AudioBuffer>, gender: string): void;
+  (e: 'playback-started', pitchId: string, currentTime: number): void;
+  (e: 'playback-ended', pitchId: string): void;
+  (e: 'playback-stopped', pitchId: string): void;
 }>();
 
 // 親コンポーネントからのプロップス
@@ -133,59 +139,43 @@ const props = defineProps<{
 }>();
 
 // リアクティブな状態
-const audioFile = ref<File | null>(null);
-const audioUrl = ref<string | null>(null);
-const audioPlayer = ref<HTMLAudioElement | null>(null);
+const gender = ref<'male' | 'female'>('male');
 const audioContext = ref<AudioContext | null>(null);
-const audioBuffer = ref<AudioBuffer | null>(null);
 const isAnalyzing = ref<boolean>(false);
-const isPlaying = ref<boolean>(false);
-const isLoading = ref<boolean>(false);
 const isAnalyzed = ref<boolean>(false);
-const sliderPosition = ref<number>(0); // スライダーの位置（120分割/秒）
-const animationFrameId = ref<number | null>(null); // アニメーションフレームID
-const selectedNote = ref<string>("A4"); // デフォルトはA4
-const noteOptions = [
-  // A3 (57) から A5 (81) までの音高と周波数のマッピング
-  { title: "A3 (220.00 Hz)", value: "A3" },
-  { title: "A#3 (233.08 Hz)", value: "A#3" },
-  { title: "B3 (246.94 Hz)", value: "B3" },
-  { title: "C4 (261.63 Hz)", value: "C4" },
-  { title: "C#4 (277.18 Hz)", value: "C#4" },
-  { title: "D4 (293.66 Hz)", value: "D4" },
-  { title: "D#4 (311.13 Hz)", value: "D#4" },
-  { title: "E4 (329.63 Hz)", value: "E4" },
-  { title: "F4 (349.23 Hz)", value: "F4" },
-  { title: "F#4 (369.99 Hz)", value: "F#4" },
-  { title: "G4 (392.00 Hz)", value: "G4" },
-  { title: "G#4 (415.30 Hz)", value: "G#4" },
-  { title: "A4 (440.00 Hz)", value: "A4" },
-  { title: "A#4 (466.16 Hz)", value: "A#4" },
-  { title: "B4 (493.88 Hz)", value: "B4" },
-  { title: "C5 (523.25 Hz)", value: "C5" },
-  { title: "C#5 (554.37 Hz)", value: "C#5" },
-  { title: "D5 (587.33 Hz)", value: "D5" },
-  { title: "D#5 (622.25 Hz)", value: "D#5" },
-  { title: "E5 (659.25 Hz)", value: "E5" },
-  { title: "F5 (698.46 Hz)", value: "F5" },
-  { title: "F#5 (739.99 Hz)", value: "F#5" },
-  { title: "G5 (783.99 Hz)", value: "G5" },
-  { title: "G#5 (830.61 Hz)", value: "G#5" },
-  { title: "A5 (880.00 Hz)", value: "A5" }
-];
-const analysisData = ref<{
-  pitchData: number[];
-  frequencyData: Uint8Array[];
-  timestamps: number[];
-}>({
-  pitchData: [],
-  frequencyData: [],
-  timestamps: []
+const oscillator = ref<OscillatorNode | null>(null);
+
+// 音程セット
+const pitchSet = computed(() => {
+  if (gender.value === 'male') {
+    return [
+      { id: 'e3', name: 'E3', frequency: 164.81 },
+      { id: 'e4', name: 'E4', frequency: 329.63 },
+      { id: 'a4', name: 'A4', frequency: 440.00 }
+    ];
+  } else {
+    return [
+      { id: 'a3', name: 'A3', frequency: 220.00 },
+      { id: 'a4', name: 'A4', frequency: 440.00 },
+      { id: 'e5', name: 'E5', frequency: 659.25 }
+    ];
+  }
+});
+
+// 音声ファイル関連の状態
+const audioFiles = ref<Record<string, File | null>>({});
+const audioUrls = ref<Record<string, string | null>>({});
+const audioPlayers = ref<Record<string, HTMLAudioElement | null>>({});
+const audioBuffers = ref<Record<string, AudioBuffer | null>>({});
+const isPlaying = ref<Record<string, boolean>>({});
+
+// すべての音程がアップロードされているかどうか
+const allPitchesUploaded = computed(() => {
+  return pitchSet.value.every(pitch => !!audioBuffers.value[pitch.id]);
 });
 
 // バリデーションルール
 const rules = {
-  required: (value: File | null) => !!value || 'ファイルを選択してください',
   fileType: (value: File | null) => {
     if (!value) return true;
     const allowedTypes = ['audio/mp3', 'audio/wav', 'audio/mpeg'];
@@ -193,40 +183,100 @@ const rules = {
   }
 };
 
-// ファイル選択時の処理
-const handleFileChange = async (files: File | File[] | null) => {
-  const file = files instanceof Array ? files[0] : files;
-  if (file) {
-    // 以前のURLをクリア
-    if (audioUrl.value) {
-      URL.revokeObjectURL(audioUrl.value);
+// 性別が変更されたときに音声ファイルをクリア
+watch(gender, () => {
+  clearAllAudio();
+});
+
+// AudioContextの初期化
+const initAudioContext = () => {
+  if (!audioContext.value) {
+    audioContext.value = new (window.AudioContext || window.AudioContext)();
+  }
+  return audioContext.value;
+};
+
+// 参考音を再生する関数
+const playReferenceTone = (frequency: number) => {
+  // 既存のオシレーターを停止
+  if (oscillator.value) {
+    oscillator.value.stop();
+    oscillator.value.disconnect();
+    oscillator.value = null;
+  }
+  
+  const context = initAudioContext();
+  
+  // オシレーターを作成
+  oscillator.value = context.createOscillator();
+  oscillator.value.type = 'sine';
+  oscillator.value.frequency.setValueAtTime(frequency, context.currentTime);
+  
+  // ゲインノードを作成（音量調整用）
+  const gainNode = context.createGain();
+  gainNode.gain.setValueAtTime(0, context.currentTime);
+  gainNode.gain.linearRampToValueAtTime(0.5, context.currentTime + 0.1);
+  gainNode.gain.linearRampToValueAtTime(0, context.currentTime + 1.5);
+  
+  // 接続して再生
+  oscillator.value.connect(gainNode);
+  gainNode.connect(context.destination);
+  oscillator.value.start();
+  
+  // 1.5秒後に停止
+  setTimeout(() => {
+    if (oscillator.value) {
+      oscillator.value.stop();
+      oscillator.value.disconnect();
+      oscillator.value = null;
     }
-    
-    // 新しいURLを作成
-    audioUrl.value = URL.createObjectURL(file);
+  }, 1500);
+};
+
+// オーディオプレーヤーの参照を設定
+const setAudioPlayerRef = (el: HTMLAudioElement | null, pitchId: string) => {
+  audioPlayers.value[pitchId] = el;
+};
+
+// ファイル選択時の処理
+const handleFileChange = async (file: File | null, pitchId: string) => {
+  // 以前のURLをクリア
+  if (audioUrls.value[pitchId]) {
+    URL.revokeObjectURL(audioUrls.value[pitchId]!);
+  }
+  
+  if (file) {
+    audioFiles.value[pitchId] = file;
+    audioUrls.value[pitchId] = URL.createObjectURL(file);
+    audioBuffers.value[pitchId] = null; // 新しいファイルがアップロードされたらバッファをリセット
+    isPlaying.value[pitchId] = false;
   } else {
-    clearAudio();
+    clearAudio(pitchId);
   }
 };
 
 // 音声ファイルが読み込まれたときの処理
-const handleAudioLoaded = async () => {
-  if (!audioFile.value || !audioUrl.value) return;
+const handleAudioLoaded = async (event: Event, pitchId: string) => {
+  const file = audioFiles.value[pitchId];
+  if (!file) return;
   
   try {
-    // AudioContextの初期化
-    if (!audioContext.value) {
-      audioContext.value = new (window.AudioContext || window.AudioContext)();
-    }
+    const context = initAudioContext();
     
     // ファイルを読み込む
-    const arrayBuffer = await audioFile.value.arrayBuffer();
+    const arrayBuffer = await file.arrayBuffer();
     
     // AudioBufferに変換
-    audioBuffer.value = await audioContext.value.decodeAudioData(arrayBuffer);
+    const buffer = await context.decodeAudioData(arrayBuffer);
+    audioBuffers.value[pitchId] = buffer;
     
-    // イベントを発火
-    emit('audio-loaded', audioBuffer.value);
+    console.log(`${pitchId} の音声ファイルを読み込みました`);
+    
+    // すべての音程がアップロードされたかチェック
+    if (allPitchesUploaded.value) {
+      // イベントを発火
+      emit('audio-loaded', { ...audioBuffers.value } as Record<string, AudioBuffer>);
+    }
   } catch (error) {
     console.error('音声ファイルの読み込みに失敗しました:', error);
     alert('音声ファイルの読み込みに失敗しました。別のファイルを試してください。');
@@ -235,22 +285,23 @@ const handleAudioLoaded = async () => {
 
 // 分析ボタンのクリックハンドラ
 const analyzeAudio = async () => {
-  if (!audioBuffer.value) return;
+  if (!allPitchesUploaded.value) return;
   
   isAnalyzing.value = true;
   isAnalyzed.value = false; // 分析開始時にリセット
   
   try {
     console.log('音声ファイルの分析を開始します');
-    console.log(`選択された音高: ${selectedNote.value}`);
+    console.log(`選択された性別: ${gender.value}`);
     
-    // 分析リクエストを発火（選択された音高の情報も渡す）
-    emit('analysis-requested', audioBuffer.value, selectedNote.value);
+    // 分析リクエストを発火
+    emit('analysis-requested', { ...audioBuffers.value } as Record<string, AudioBuffer>, gender.value);
     
     // 注意: 分析完了フラグは親コンポーネントから通知される
   } catch (error) {
     console.error('音声分析に失敗しました:', error);
     alert('音声分析に失敗しました。');
+    isAnalyzing.value = false;
   }
 };
 
@@ -263,229 +314,91 @@ watch(() => props.analysisCompleted, (completed) => {
   }
 });
 
-// 再生/停止のトグルハンドラ
-const togglePlayback = () => {
-  if (isPlaying.value) {
-    stopAudio();
-  } else {
-    playAudio();
+// 特定の音程の音声をクリア
+const clearAudio = (pitchId: string) => {
+  if (audioUrls.value[pitchId]) {
+    URL.revokeObjectURL(audioUrls.value[pitchId]!);
   }
+  
+  audioFiles.value[pitchId] = null;
+  audioUrls.value[pitchId] = null;
+  audioBuffers.value[pitchId] = null;
+  isPlaying.value[pitchId] = false;
+  
+  if (audioPlayers.value[pitchId]) {
+    audioPlayers.value[pitchId]!.pause();
+    audioPlayers.value[pitchId]!.currentTime = 0;
+  }
+  
+  console.log(`${pitchId} の音声ファイルをクリアしました`);
 };
 
-// スライダーを滑らかに更新するアニメーション関数
-const updateSliderAnimation = () => {
-  if (!audioPlayer.value || !isPlaying.value) {
-    if (animationFrameId.value !== null) {
-      cancelAnimationFrame(animationFrameId.value);
-      animationFrameId.value = null;
-    }
-    return;
-  }
+// すべての音声をクリア
+const clearAllAudio = () => {
+  // 現在のpitchSetに基づいてクリア
+  pitchSet.value.forEach(pitch => {
+    clearAudio(pitch.id);
+  });
   
-  const currentTime = audioPlayer.value.currentTime;
-  
-  // スライダーの位置を更新（1秒 = 120分割）
-  const newPosition = Math.round(currentTime * 120);
-  if (sliderPosition.value !== newPosition) {
-    sliderPosition.value = newPosition;
-    
-    // 表示を更新
-    emit('playback-time-updated', currentTime);
-  }
-  
-  // 次のフレームをリクエスト
-  animationFrameId.value = requestAnimationFrame(updateSliderAnimation);
-};
-
-// 再生ボタンのクリックハンドラ - 分析済みデータを使用して再生
-const playAudio = async () => {
-  if (!audioBuffer.value || !audioPlayer.value || !isAnalyzed.value) return;
-  
-  isLoading.value = true;
-  
-  try {
-    // 再生を開始
-    await audioPlayer.value.play();
-    
-    // 状態を更新
-    isPlaying.value = true;
-    
-    console.log('音声ファイルの再生を開始しました');
-    
-    // 再生開始イベントを発火
-    emit('playback-started', audioPlayer.value.currentTime);
-    
-    // 再生開始時に現在位置のデータを表示するために、playback-time-updatedイベントも発火
-    const currentTime = audioPlayer.value.currentTime;
-    sliderPosition.value = Math.round(currentTime * 120);
-    emit('playback-time-updated', currentTime);
-    
-    // アニメーションを開始
-    if (animationFrameId.value === null) {
-      animationFrameId.value = requestAnimationFrame(updateSliderAnimation);
-    }
-  } catch (error) {
-    console.error('音声再生に失敗しました:', error);
-    alert('音声再生に失敗しました。');
-    isPlaying.value = false;
-  } finally {
-    isLoading.value = false;
-  }
-};
-
-// 停止ハンドラ
-const stopAudio = () => {
-  if (!audioPlayer.value) return;
-  
-  try {
-    // 再生を停止
-    audioPlayer.value.pause();
-    audioPlayer.value.currentTime = 0;
-    
-    // 状態を更新
-    isPlaying.value = false;
-    
-    // アニメーションを停止
-    if (animationFrameId.value !== null) {
-      cancelAnimationFrame(animationFrameId.value);
-      animationFrameId.value = null;
-    }
-    
-    console.log('音声ファイルの再生を停止しました');
-    
-    // 停止イベントを発火
-    emit('playback-stopped');
-  } catch (error) {
-    console.error('音声停止に失敗しました:', error);
-  }
-};
-
-// クリアボタンのクリックハンドラ
-const clearAudio = () => {
-  // 再生中なら停止
-  if (isPlaying.value) {
-    stopAudio();
-  }
-  
-  if (audioUrl.value) {
-    URL.revokeObjectURL(audioUrl.value);
-  }
-  
-  audioFile.value = null;
-  audioUrl.value = null;
-  audioBuffer.value = null;
   isAnalyzed.value = false;
-  sliderPosition.value = 0;
-  
-  // 分析データをクリア
-  analysisData.value = {
-    pitchData: [],
-    frequencyData: [],
-    timestamps: []
-  };
-  
-  if (audioPlayer.value) {
-    audioPlayer.value.pause();
-    audioPlayer.value.currentTime = 0;
-  }
-  
-  console.log('音声ファイルをクリアしました');
+  console.log('すべての音声ファイルをクリアしました');
+};
+
+// 音声再生が開始されたときの処理
+const handlePlaybackStarted = (pitchId: string, currentTime: number) => {
+  isPlaying.value[pitchId] = true;
+  emit('playback-started', pitchId, currentTime);
 };
 
 // 音声再生が終了したときの処理
-const handleAudioEnded = () => {
-  console.log('音声再生が終了しました');
-  isPlaying.value = false;
-  isAnalyzing.value = false;
-  
-  // アニメーションを停止
-  if (animationFrameId.value !== null) {
-    cancelAnimationFrame(animationFrameId.value);
-    animationFrameId.value = null;
-  }
-  
-  emit('playback-ended');
+const handlePlaybackEnded = (pitchId: string) => {
+  isPlaying.value[pitchId] = false;
+  emit('playback-ended', pitchId);
 };
 
-// audioPlayerの参照が変更されたときにイベントリスナーを設定
-watch(audioPlayer, (newPlayer: HTMLAudioElement | null, oldPlayer: HTMLAudioElement | null) => {
-  // 古いプレーヤーからイベントリスナーを削除
-  if (oldPlayer) {
-    oldPlayer.removeEventListener('ended', handleAudioEnded);
-    oldPlayer.removeEventListener('timeupdate', handleTimeUpdate);
-  }
-  
-  // 新しいプレーヤーにイベントリスナーを追加
-  if (newPlayer) {
-    newPlayer.addEventListener('ended', handleAudioEnded);
-    newPlayer.addEventListener('timeupdate', handleTimeUpdate);
-  }
-});
-
-// 再生時間が更新されたときの処理
-// 注: requestAnimationFrameを使用するため、この関数は主にデバッグ用になります
-const handleTimeUpdate = () => {
-  // アニメーションフレームで処理するため、ここでは何もしない
-};
-
-// スライダーの値が変更されたときの処理
-const handleSliderChange = (value: number) => {
-  if (!audioPlayer.value || !audioBuffer.value) return;
-  
-  // スライダーの値から時間を計算（1分割 = 1/120秒）
-  const seekTime = value / 120;
-  
-  // 音声の再生位置を設定
-  audioPlayer.value.currentTime = seekTime;
-  
-  // スライダーの位置に基づいて表示を更新するために親コンポーネントに通知
-  // 再生中でなくても表示を更新するために、playback-time-updatedイベントも発火
-  emit('seek-to-time', seekTime);
-  emit('playback-time-updated', seekTime);
-};
-
-// 時間を「分:秒.ミリ秒」形式にフォーマットする関数
-const formatTime = (seconds: number): string => {
-  const min = Math.floor(seconds / 60);
-  const sec = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds % 1) * 1000);
-  
-  return `${min}:${sec.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
-};
-
-// コンポーネントがマウントされたときのイベントリスナー設定
+// コンポーネントがマウントされたときの処理
 onMounted(() => {
-  if (audioPlayer.value) {
-    audioPlayer.value.addEventListener('ended', handleAudioEnded);
-    audioPlayer.value.addEventListener('timeupdate', handleTimeUpdate);
-  }
+  // 音声プレーヤーのイベントリスナーを設定
+  Object.keys(audioPlayers.value).forEach(pitchId => {
+    const player = audioPlayers.value[pitchId];
+    if (player) {
+      player.addEventListener('play', () => handlePlaybackStarted(pitchId, player.currentTime));
+      player.addEventListener('ended', () => handlePlaybackEnded(pitchId));
+    }
+  });
 });
 
 // コンポーネントがアンマウントされたときのクリーンアップ
 onUnmounted(() => {
-  if (audioUrl.value) {
-    URL.revokeObjectURL(audioUrl.value);
+  // URLをクリア
+  Object.values(audioUrls.value).forEach(url => {
+    if (url) URL.revokeObjectURL(url);
+  });
+  
+  // オシレーターを停止
+  if (oscillator.value) {
+    oscillator.value.stop();
+    oscillator.value.disconnect();
   }
   
+  // AudioContextを閉じる
   if (audioContext.value && audioContext.value.state !== 'closed') {
     audioContext.value.close();
   }
   
-  if (audioPlayer.value) {
-    audioPlayer.value.removeEventListener('ended', handleAudioEnded);
-    audioPlayer.value.removeEventListener('timeupdate', handleTimeUpdate);
-  }
-  
-  // アニメーションを停止
-  if (animationFrameId.value !== null) {
-    cancelAnimationFrame(animationFrameId.value);
-    animationFrameId.value = null;
-  }
+  // 音声プレーヤーのイベントリスナーを削除
+  Object.keys(audioPlayers.value).forEach(pitchId => {
+    const player = audioPlayers.value[pitchId];
+    if (player) {
+      player.removeEventListener('play', () => handlePlaybackStarted(pitchId, player.currentTime));
+      player.removeEventListener('ended', () => handlePlaybackEnded(pitchId));
+    }
+  });
 });
 </script>
 
 <style scoped>
-.audio-file-uploader {
+.voice-type-uploader {
   width: 100%;
 }
 
@@ -496,9 +409,5 @@ onUnmounted(() => {
 audio {
   width: 100%;
   margin: 8px 0;
-}
-
-.time-slider-container {
-  padding: 0 8px;
 }
 </style>

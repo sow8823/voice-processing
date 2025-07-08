@@ -3,7 +3,8 @@
  */
 import type { HarmonicAnalysisResult } from './FrequencyAnalysisService';
 
-export type VoiceType = 'lightChest' | 'pull' | 'mixed' | 'unknown';
+// ボイスタイプの定義を拡張（フリップとミックスを追加）
+export type VoiceType = 'lightChest' | 'pull' | 'flip' | 'mixed' | 'unknown';
 
 export interface VoiceTypeAnalysisResult {
   voiceType: VoiceType;
@@ -13,7 +14,24 @@ export interface VoiceTypeAnalysisResult {
     harmonic3Ratio: number;
     highFrequencyRatio: number;
     noiseRatio: number;
-    // その他の分析パラメータ
+    // 新しいパラメータ
+    voiceConsistency?: number; // 音程間の声質一貫性（ミックスの特徴）
+    pitchAccuracy?: number; // 音程精度（プルはフラット傾向）
+    voiceQualityChange?: number; // 声質変化の度合い（フリップの特徴）
+    brightness3kHz?: number; // 3kHz周辺の強さ（ミックスの特徴）
+  };
+  // 各音程ごとの分析結果
+  pitchResults?: {
+    [pitchId: string]: {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        harmonic2Ratio: number;
+        harmonic3Ratio: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }
   };
   timeSegments?: {
     startTime: number;
@@ -22,10 +40,23 @@ export interface VoiceTypeAnalysisResult {
   }[];
 }
 
+// 性別ごとの音程セット定義
+export interface PitchSet {
+  id: string;
+  name: string;
+  frequency: number;
+}
+
+export type GenderPitchSets = {
+  male: PitchSet[];
+  female: PitchSet[];
+};
+
 export class VoiceTypeAnalysisService {
   // 音高と周波数のマッピング
   private noteFrequencyMap: Record<string, number> = {
     // A3 (57) から A5 (81) までの音高と周波数のマッピング
+    "E3": 164.81,
     "A3": 220.00,
     "A#3": 233.08,
     "B3": 246.94,
@@ -53,8 +84,136 @@ export class VoiceTypeAnalysisService {
     "A5": 880.00
   };
 
+  // 性別ごとの音程セット
+  private genderPitchSets: GenderPitchSets = {
+    male: [
+      { id: 'e3', name: 'E3', frequency: 164.81 },
+      { id: 'e4', name: 'E4', frequency: 329.63 },
+      { id: 'a4', name: 'A4', frequency: 440.00 }
+    ],
+    female: [
+      { id: 'a3', name: 'A3', frequency: 220.00 },
+      { id: 'a4', name: 'A4', frequency: 440.00 },
+      { id: 'e5', name: 'E5', frequency: 659.25 }
+    ]
+  };
+
   /**
-   * 音声タイプを分析するメソッド
+   * 複数の音程の音声を分析してボイスタイプを総合的に判定する
+   * @param audioBuffers 各音程のAudioBufferのマップ
+   * @param frequencyDataArrays 各音程の周波数データ配列のマップ
+   * @param pitchDataArrays 各音程のピッチデータ配列のマップ
+   * @param timestampsArrays 各音程のタイムスタンプ配列のマップ
+   * @param sampleRate サンプリングレート
+   * @param gender 性別（'male'または'female'）
+   * @returns ボイスタイプ分析結果
+   */
+  analyzeMultiplePitches(
+    frequencyDataArrays: Record<string, Uint8Array[]>,
+    pitchDataArrays: Record<string, number[]>,
+    timestampsArrays: Record<string, number[]>,
+    sampleRate: number,
+    gender: 'male' | 'female'
+  ): VoiceTypeAnalysisResult {
+    // 各音程ごとの分析結果
+    const pitchResults: Record<string, {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        harmonic2Ratio: number;
+        harmonic3Ratio: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }> = {};
+
+    // 使用する音程セット
+    const pitchSet = this.genderPitchSets[gender];
+
+    // 各音程ごとに分析
+    for (const pitch of pitchSet) {
+      const frequencyDataArray = frequencyDataArrays[pitch.id];
+      const pitchDataArray = pitchDataArrays[pitch.id];
+      const timestamps = timestampsArrays[pitch.id];
+
+      if (!frequencyDataArray || !pitchDataArray || !timestamps) {
+        console.warn(`${pitch.name}の分析データが不足しています`);
+        continue;
+      }
+
+      // 単一音程の分析を実行
+      const result = this.analyzeVoiceType(
+        frequencyDataArray,
+        pitchDataArray,
+        timestamps,
+        sampleRate,
+        pitch.frequency
+      );
+
+      // 結果を保存
+      pitchResults[pitch.id] = {
+        voiceType: result.voiceType,
+        confidence: result.confidence,
+        parameters: result.parameters
+      };
+    }
+
+    // 分析結果が不足している場合
+    if (Object.keys(pitchResults).length < pitchSet.length) {
+      return {
+        voiceType: 'unknown',
+        confidence: 0,
+        parameters: {
+          harmonic2Ratio: 0,
+          harmonic3Ratio: 0,
+          highFrequencyRatio: 0,
+          noiseRatio: 0
+        },
+        pitchResults
+      };
+    }
+
+    // 音程間の声質変化を分析
+    const voiceQualityChange = this.analyzeVoiceQualityChange(pitchResults, gender);
+    
+    // 音程精度を分析（プルはフラット傾向）
+    const pitchAccuracy = this.analyzePitchAccuracy(pitchResults, gender);
+    
+    // 声質の一貫性を分析（ミックスは一貫性が高い）
+    const voiceConsistency = this.analyzeVoiceConsistency(pitchResults);
+    
+    // 3kHz周辺の強さを分析（ミックスは3kHz周辺が強い）
+    const brightness3kHz = this.analyzeBrightness3kHz(pitchResults);
+
+    // 総合的なボイスタイプ判定
+    const { voiceType, confidence } = this.determineOverallVoiceType(
+      pitchResults,
+      voiceQualityChange,
+      pitchAccuracy,
+      voiceConsistency,
+      brightness3kHz
+    );
+
+    // パラメータの平均値を計算
+    const avgParameters = this.calculateAverageParameters(pitchResults);
+
+    // 結果を返す
+    return {
+      voiceType,
+      confidence,
+      parameters: {
+        ...avgParameters,
+        voiceQualityChange,
+        pitchAccuracy,
+        voiceConsistency,
+        brightness3kHz
+      },
+      pitchResults
+    };
+  }
+
+  /**
+   * 音声タイプを分析するメソッド（単一音程）
    * @param frequencyDataArray 周波数データの配列
    * @param pitchDataArray ピッチデータの配列
    * @param timestamps タイムスタンプの配列
@@ -101,8 +260,6 @@ export class VoiceTypeAnalysisService {
         0.05 // 5%の範囲
       );
       
-      console.log(`選択音高: ${targetFrequency}Hz, 検出された基音成分: ${baseFrequency}Hz`);
-      
       // 基音成分の2倍、3倍の周波数帯で最も強い成分を見つける
       const harmonic2Frequency = this.findStrongestFrequencyComponent(
         frequencyData,
@@ -117,8 +274,6 @@ export class VoiceTypeAnalysisService {
         sampleRate,
         0.05 // 5%の範囲
       );
-      
-      console.log(`第2倍音成分: ${harmonic2Frequency}Hz, 第3倍音成分: ${harmonic3Frequency}Hz`);
       
       // 倍音分析を実行（検出された基音成分と倍音成分を使用）
       const harmonicResult = this.analyzeHarmonicComponents(
@@ -135,8 +290,8 @@ export class VoiceTypeAnalysisService {
       // ノイズ成分の割合を推定
       const noiseRatio = this.estimateNoiseRatio(frequencyData, baseFrequency, sampleRate);
 
-      // ボイスタイプを判定
-      const { voiceType, confidence } = this.determineVoiceType(
+      // ボイスタイプを判定（単一音程の分析では、プル、ライトチェスト、フリップのみ判定可能）
+      const { voiceType, confidence } = this.determineVoiceTypeForSinglePitch(
         harmonicResult,
         highFrequencyRatio,
         noiseRatio
@@ -180,6 +335,360 @@ export class VoiceTypeAnalysisService {
       ...overallResult,
       timeSegments
     };
+  }
+
+  /**
+   * 単一音程のボイスタイプを判定する（プル、ライトチェスト、フリップのみ）
+   * @param harmonicResult 倍音分析結果
+   * @param highFrequencyRatio 高周波数帯域のエネルギー比率
+   * @param noiseRatio ノイズ成分の割合
+   * @returns ボイスタイプと確信度
+   */
+  determineVoiceTypeForSinglePitch(
+    harmonicResult: HarmonicAnalysisResult,
+    highFrequencyRatio: number,
+    noiseRatio: number
+  ): { voiceType: VoiceType; confidence: number } {
+    // 各パラメータのスコアを計算（0-1の範囲）
+    const harmonic2Score = harmonicResult.harmonic2Ratio >= 70 ? 1 : harmonicResult.harmonic2Ratio / 70;
+    const harmonic3Score = harmonicResult.harmonic3Ratio >= 50 ? 1 : harmonicResult.harmonic3Ratio / 50;
+    const highFreqScore = highFrequencyRatio >= 0.3 ? 1 : highFrequencyRatio / 0.3;
+    const noiseScore = noiseRatio <= 0.2 ? 1 : 1 - ((noiseRatio - 0.2) / 0.8);
+    
+    // プルボイスの条件スコア
+    const pullScore = (harmonic2Score + harmonic3Score + highFreqScore + (1 - noiseScore)) / 4;
+    
+    // ライトチェストの条件スコア
+    const lightChestScore = (
+      (1 - harmonic2Score) + 
+      (1 - harmonic3Score) + 
+      (1 - highFreqScore) + 
+      noiseScore
+    ) / 4;
+
+    // フリップの条件スコア（声質の不安定さを検出）
+    // フリップは特定の音程で声質が急激に変化する特徴がある
+    // 単一音程の分析では完全には判定できないが、特徴的なパターンを検出する
+    const flipScore = Math.abs(harmonic2Score - 0.5) * Math.abs(highFreqScore - 0.5) * 2;
+    
+    // 最も高いスコアを持つボイスタイプを判定
+    const scores = [
+      { type: 'pull', score: pullScore },
+      { type: 'lightChest', score: lightChestScore },
+      { type: 'flip', score: flipScore }
+    ];
+    
+    scores.sort((a, b) => b.score - a.score);
+    
+    const highestScore = scores[0];
+    const secondHighestScore = scores[1];
+    
+    // 確信度を計算（最高スコアと次点のスコアの差に基づく）
+    const confidence = Math.min(1, Math.max(0, (highestScore.score - secondHighestScore.score) * 2));
+    
+    return { 
+      voiceType: highestScore.type as VoiceType, 
+      confidence 
+    };
+  }
+
+  /**
+   * 複数音程の分析結果から総合的なボイスタイプを判定する
+   * @param pitchResults 各音程の分析結果
+   * @param voiceQualityChange 声質変化の度合い
+   * @param pitchAccuracy 音程精度
+   * @param voiceConsistency 声質の一貫性
+   * @param brightness3kHz 3kHz周辺の強さ
+   * @returns ボイスタイプと確信度
+   */
+  determineOverallVoiceType(
+    pitchResults: Record<string, {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        harmonic2Ratio: number;
+        harmonic3Ratio: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }>,
+    voiceQualityChange: number,
+    pitchAccuracy: number,
+    voiceConsistency: number,
+    brightness3kHz: number
+  ): { voiceType: VoiceType; confidence: number } {
+    // 各ボイスタイプのスコアを計算
+    
+    // プルのスコア（高い倍音比率、フラット傾向、中程度の一貫性）
+    const pullScore = (
+      this.getAverageParameter(pitchResults, 'harmonic2Ratio') / 100 +
+      this.getAverageParameter(pitchResults, 'harmonic3Ratio') / 100 +
+      (1 - pitchAccuracy) * 2 +  // フラット傾向が強いほど高スコア
+      Math.min(voiceConsistency * 0.5, 0.5)  // 一貫性は中程度が理想
+    ) / 4;
+    
+    // ライトチェストのスコア（低い倍音比率、高い基音比率、低い高周波数比率）
+    const lightChestScore = (
+      (1 - this.getAverageParameter(pitchResults, 'harmonic2Ratio') / 100) +
+      (1 - this.getAverageParameter(pitchResults, 'harmonic3Ratio') / 100) +
+      (1 - this.getAverageParameter(pitchResults, 'highFrequencyRatio')) +
+      Math.min(voiceConsistency * 0.7, 0.7)  // 一貫性はやや高め
+    ) / 4;
+    
+    // フリップのスコア（声質変化が大きい、一貫性が低い）
+    const flipScore = (
+      voiceQualityChange * 2 +  // 声質変化が大きいほど高スコア
+      (1 - voiceConsistency) * 2  // 一貫性が低いほど高スコア
+    ) / 2;
+    
+    // ミックスのスコア（高い一貫性、高い3kHz周辺の強さ、良好な音程精度）
+    const mixedScore = (
+      voiceConsistency * 2 +  // 一貫性が高いほど高スコア
+      brightness3kHz * 2 +  // 3kHz周辺が強いほど高スコア
+      pitchAccuracy +  // 音程精度が高いほど高スコア
+      this.getAverageParameter(pitchResults, 'harmonic2Ratio') / 100  // 倍音も豊か
+    ) / 5;
+    
+    // 最も高いスコアを持つボイスタイプを判定
+    const scores = [
+      { type: 'pull', score: pullScore },
+      { type: 'lightChest', score: lightChestScore },
+      { type: 'flip', score: flipScore },
+      { type: 'mixed', score: mixedScore }
+    ];
+    
+    scores.sort((a, b) => b.score - a.score);
+    
+    const highestScore = scores[0];
+    const secondHighestScore = scores[1];
+    
+    // 確信度を計算（最高スコアと次点のスコアの差に基づく）
+    const confidence = Math.min(1, Math.max(0, (highestScore.score - secondHighestScore.score) * 2));
+    
+    console.log('ボイスタイプ判定スコア:', scores);
+    
+    return { 
+      voiceType: highestScore.type as VoiceType, 
+      confidence 
+    };
+  }
+
+  /**
+   * 音程間の声質変化を分析する（フリップの特徴）
+   * @param pitchResults 各音程の分析結果
+   * @param gender 性別
+   * @returns 声質変化の度合い（0-1）
+   */
+  analyzeVoiceQualityChange(
+    pitchResults: Record<string, {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        harmonic2Ratio: number;
+        harmonic3Ratio: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }>,
+    gender: 'male' | 'female'
+  ): number {
+    const pitchSet = this.genderPitchSets[gender];
+    
+    // 低音と高音の倍音構造の差を計算
+    const lowPitch = pitchSet[0];
+    const highPitch = pitchSet[2];
+    
+    const lowPitchResult = pitchResults[lowPitch.id];
+    const highPitchResult = pitchResults[highPitch.id];
+    
+    if (!lowPitchResult || !highPitchResult) {
+      return 0;
+    }
+    
+    // 倍音構造の差を計算
+    const harmonic2Diff = Math.abs(
+      lowPitchResult.parameters.harmonic2Ratio - highPitchResult.parameters.harmonic2Ratio
+    ) / 100;
+    
+    const harmonic3Diff = Math.abs(
+      lowPitchResult.parameters.harmonic3Ratio - highPitchResult.parameters.harmonic3Ratio
+    ) / 100;
+    
+    const highFreqDiff = Math.abs(
+      lowPitchResult.parameters.highFrequencyRatio - highPitchResult.parameters.highFrequencyRatio
+    );
+    
+    // 声質変化の度合いを計算（0-1）
+    const voiceQualityChange = (harmonic2Diff + harmonic3Diff + highFreqDiff) / 3;
+    
+    return Math.min(1, voiceQualityChange);
+  }
+
+  /**
+   * 音程精度を分析する（プルはフラット傾向）
+   * @param pitchResults 各音程の分析結果
+   * @param gender 性別
+   * @returns 音程精度（0-1、1が最も正確）
+   */
+  analyzePitchAccuracy(
+    pitchResults: Record<string, {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        harmonic2Ratio: number;
+        harmonic3Ratio: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }>,
+    gender: 'male' | 'female'
+  ): number {
+    // 実装は省略（実際には検出されたピッチと目標ピッチの差を計算）
+    // 現在のデータでは正確な音程精度を計算するのは難しいため、
+    // 仮の値として0.8（やや正確）を返す
+    return 0.8;
+  }
+
+  /**
+   * 声質の一貫性を分析する（ミックスは一貫性が高い）
+   * @param pitchResults 各音程の分析結果
+   * @returns 声質の一貫性（0-1）
+   */
+  analyzeVoiceConsistency(
+    pitchResults: Record<string, {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        harmonic2Ratio: number;
+        harmonic3Ratio: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }>
+  ): number {
+    // 各パラメータの標準偏差を計算
+    const harmonic2Values = Object.values(pitchResults).map(r => r.parameters.harmonic2Ratio);
+    const harmonic3Values = Object.values(pitchResults).map(r => r.parameters.harmonic3Ratio);
+    const highFreqValues = Object.values(pitchResults).map(r => r.parameters.highFrequencyRatio * 100);
+    
+    const harmonic2StdDev = this.calculateStandardDeviation(harmonic2Values);
+    const harmonic3StdDev = this.calculateStandardDeviation(harmonic3Values);
+    const highFreqStdDev = this.calculateStandardDeviation(highFreqValues);
+    
+    // 標準偏差が小さいほど一貫性が高い
+    const maxStdDev = 30; // 最大想定標準偏差
+    const avgStdDev = (harmonic2StdDev + harmonic3StdDev + highFreqStdDev) / 3;
+    
+    // 一貫性を計算（0-1）
+    const consistency = 1 - Math.min(1, avgStdDev / maxStdDev);
+    
+    return consistency;
+  }
+
+  /**
+   * 3kHz周辺の強さを分析する（ミックスは3kHz周辺が強い）
+   * @param pitchResults 各音程の分析結果
+   * @returns 3kHz周辺の強さ（0-1）
+   */
+  analyzeBrightness3kHz(
+    pitchResults: Record<string, {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        harmonic2Ratio: number;
+        harmonic3Ratio: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }>
+  ): number {
+    // 高周波数帯域のエネルギー比率の平均を計算
+    const highFreqRatios = Object.values(pitchResults).map(r => r.parameters.highFrequencyRatio);
+    const avgHighFreqRatio = highFreqRatios.reduce((sum, val) => sum + val, 0) / highFreqRatios.length;
+    
+    // 3kHz周辺の強さを推定（0-1）
+    // 現在のデータでは3kHz周辺のみを正確に分離できないため、
+    // 高周波数帯域全体のエネルギー比率から推定
+    const brightness3kHz = Math.min(1, avgHighFreqRatio * 3);
+    
+    return brightness3kHz;
+  }
+
+  /**
+   * 標準偏差を計算する
+   * @param values 値の配列
+   * @returns 標準偏差
+   */
+  calculateStandardDeviation(values: number[]): number {
+    const n = values.length;
+    if (n === 0) return 0;
+    
+    const mean = values.reduce((sum, val) => sum + val, 0) / n;
+    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / n;
+    
+    return Math.sqrt(variance);
+  }
+
+  /**
+   * 各音程の分析結果からパラメータの平均値を計算する
+   * @param pitchResults 各音程の分析結果
+   * @returns パラメータの平均値
+   */
+  calculateAverageParameters(
+    pitchResults: Record<string, {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        harmonic2Ratio: number;
+        harmonic3Ratio: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }>
+  ): {
+    harmonic2Ratio: number;
+    harmonic3Ratio: number;
+    highFrequencyRatio: number;
+    noiseRatio: number;
+  } {
+    const results = Object.values(pitchResults);
+    
+    return {
+      harmonic2Ratio: this.getAverageParameter(pitchResults, 'harmonic2Ratio'),
+      harmonic3Ratio: this.getAverageParameter(pitchResults, 'harmonic3Ratio'),
+      highFrequencyRatio: this.getAverageParameter(pitchResults, 'highFrequencyRatio'),
+      noiseRatio: this.getAverageParameter(pitchResults, 'noiseRatio')
+    };
+  }
+
+  /**
+   * 特定のパラメータの平均値を取得する
+   * @param pitchResults 各音程の分析結果
+   * @param paramName パラメータ名
+   * @returns パラメータの平均値
+   */
+  /**
+   * 特定のパラメータの平均値を取得する
+   * @param pitchResults 各音程の分析結果
+   * @param paramName パラメータ名
+   * @returns パラメータの平均値
+   */
+  getAverageParameter(
+    pitchResults: Record<string, {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        harmonic2Ratio: number;
+        harmonic3Ratio: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }>,
+    paramName: 'harmonic2Ratio' | 'harmonic3Ratio' | 'highFrequencyRatio' | 'noiseRatio'
+  ): number {
+    const values = Object.values(pitchResults).map(r => r.parameters[paramName]);
+    if (values.length === 0) return 0;
+    return values.reduce((sum, val) => sum + val, 0) / values.length;
   }
 
   /**
@@ -265,47 +774,6 @@ export class VoiceTypeAnalysisService {
   }
 
   /**
-   * ボイスタイプを判定する
-   * @param harmonicResult 倍音分析結果
-   * @param highFrequencyRatio 高周波数帯域のエネルギー比率
-   * @param noiseRatio ノイズ成分の割合
-   * @returns ボイスタイプと確信度
-   */
-  determineVoiceType(
-    harmonicResult: HarmonicAnalysisResult,
-    highFrequencyRatio: number,
-    noiseRatio: number
-  ): { voiceType: VoiceType; confidence: number } {
-    // 各パラメータのスコアを計算（0-1の範囲）
-    const harmonic2Score = harmonicResult.harmonic2Ratio >= 70 ? 1 : harmonicResult.harmonic2Ratio / 70;
-    const harmonic3Score = harmonicResult.harmonic3Ratio >= 50 ? 1 : harmonicResult.harmonic3Ratio / 50;
-    const highFreqScore = highFrequencyRatio >= 0.3 ? 1 : highFrequencyRatio / 0.3;
-    const noiseScore = noiseRatio <= 0.2 ? 1 : 1 - ((noiseRatio - 0.2) / 0.8);
-    
-    // プルボイスの条件スコア
-    const pullScore = (harmonic2Score + harmonic3Score + highFreqScore + noiseScore) / 4;
-    
-    // ライトチェストの条件スコア
-    const lightChestScore = (
-      (1 - harmonic2Score) + 
-      (1 - harmonic3Score) + 
-      (1 - highFreqScore) + 
-      (1 - noiseScore)
-    ) / 4;
-    
-    // スコアに基づいてボイスタイプを判定
-    if (pullScore > lightChestScore) {
-      // プルボイスの確信度
-      const confidence = Math.min(1, Math.max(0, (pullScore - lightChestScore) * 2));
-      return { voiceType: 'pull', confidence };
-    } else {
-      // ライトチェストの確信度
-      const confidence = Math.min(1, Math.max(0, (lightChestScore - pullScore) * 2));
-      return { voiceType: 'lightChest', confidence };
-    }
-  }
-
-  /**
    * 分析結果を集計する
    * @param segmentResults セグメント毎の分析結果
    * @returns 全体の分析結果
@@ -327,6 +795,7 @@ export class VoiceTypeAnalysisService {
     const typeCounts: Record<VoiceType, number> = {
       lightChest: 0,
       pull: 0,
+      flip: 0,
       mixed: 0,
       unknown: 0
     };
@@ -352,7 +821,7 @@ export class VoiceTypeAnalysisService {
     let dominantType: VoiceType = 'unknown';
     let maxCount = 0;
     
-    for (const type of ['lightChest', 'pull', 'mixed', 'unknown'] as VoiceType[]) {
+    for (const type of ['lightChest', 'pull', 'flip', 'mixed', 'unknown'] as VoiceType[]) {
       if (typeCounts[type] > maxCount) {
         maxCount = typeCounts[type];
         dominantType = type;
@@ -383,7 +852,6 @@ export class VoiceTypeAnalysisService {
   /**
    * 時間セグメントを作成する
    * @param segmentResults セグメント毎の分析結果
-   * @param timestamps タイムスタンプの配列
    * @returns 時間セグメントの配列
    */
   createTimeSegments(
@@ -501,21 +969,30 @@ export class VoiceTypeAnalysisService {
     const harmonic3Idx = Math.round((harmonic3Frequency / sampleRate) * fftSize);
     
     // 各周波数の振幅を取得
-    const baseAmp = baseIdx < frequencyData.length ? frequencyData[baseIdx] : 1;
+    const baseAmp = baseIdx < frequencyData.length ? frequencyData[baseIdx] : 0;
     const harmonic2Amp = harmonic2Idx < frequencyData.length ? frequencyData[harmonic2Idx] : 0;
     const harmonic3Amp = harmonic3Idx < frequencyData.length ? frequencyData[harmonic3Idx] : 0;
     
-    // 比率を計算
+    // 基音の振幅が0の場合は0を返す（ゼロ除算を防ぐ）
+    if (baseAmp === 0) {
+      return {
+        harmonic2Ratio: 0,
+        harmonic3Ratio: 0,
+        bandPeakRatio: 0
+      };
+    }
+    
+    // 倍音比率を計算
     const harmonic2Ratio = (harmonic2Amp / baseAmp) * 100;
     const harmonic3Ratio = (harmonic3Amp / baseAmp) * 100;
     
-    // 2.8kHz～3.2kHzの周波数帯域の最大振幅を計算
+    // 3kHz周辺の周波数帯域の最大振幅を計算
     const startIdx = Math.floor((2800 / sampleRate) * fftSize);
     const endIdx = Math.ceil((3200 / sampleRate) * fftSize);
     
     let maxAmp = 0;
     for (let i = startIdx; i <= endIdx; i++) {
-      if (i < frequencyData.length && frequencyData[i] > maxAmp) {
+      if (i >= 0 && i < frequencyData.length && frequencyData[i] > maxAmp) {
         maxAmp = frequencyData[i];
       }
     }
@@ -529,6 +1006,3 @@ export class VoiceTypeAnalysisService {
     };
   }
 }
-
-// シングルトンインスタンスをエクスポート
-export const voiceTypeAnalysisService = new VoiceTypeAnalysisService();
