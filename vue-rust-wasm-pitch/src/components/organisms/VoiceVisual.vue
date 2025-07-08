@@ -520,6 +520,10 @@ const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffe
     isLoading.value = true;
     analysisCompleted.value = false;
     
+    // ピッチ検出サービスを初期化
+    await pitchDetectionService.initialize();
+    console.log('ピッチ検出サービスを初期化しました');
+    
     // 各音声ファイルの周波数データとピッチデータを取得
     const frequencyDataArrays: Record<string, Uint8Array[]> = {};
     const pitchDataArrays: Record<string, number[]> = {};
