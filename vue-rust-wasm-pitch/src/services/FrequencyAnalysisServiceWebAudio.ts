@@ -12,6 +12,10 @@ export class FrequencyAnalysisServiceWebAudio {
   private analyser: AnalyserNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private isWorkletRegistered = false;
+  
+  // 周波数データの平均化のための過去のデータを保存するキュー
+  private frequencyDataQueue: Uint8Array[] = [];
+  private readonly maxQueueSize = 5; // 過去5フレーム分のデータを保存
 
   /**
    * サービスを初期化する
@@ -50,7 +54,8 @@ export class FrequencyAnalysisServiceWebAudio {
     // AnalyserNodeを作成
     this.analyser = this.audioContext.createAnalyser();
     this.analyser.fftSize = fftSize;
-    this.analyser.smoothingTimeConstant = 0.0; // スムージングなし
+    this.analyser.minDecibels = -90; // AudioServiceと同じ設定
+    this.analyser.smoothingTimeConstant = 0.85; // AudioServiceと同じ設定
   }
 
   /**
@@ -120,7 +125,8 @@ export class FrequencyAnalysisServiceWebAudio {
     // 一時的なAnalyserNodeを作成
     const analyser = offlineContext.createAnalyser();
     analyser.fftSize = bufferSize * 2; // より詳細な周波数分析のため
-    analyser.smoothingTimeConstant = 0.0;
+    analyser.minDecibels = -90; // AudioServiceと同じ設定
+    analyser.smoothingTimeConstant = 0.85; // AudioServiceと同じ設定
 
     // 一時的なバッファを作成
     const tempBuffer = offlineContext.createBuffer(1, bufferSize, audioBuffer.sampleRate);
@@ -144,7 +150,8 @@ export class FrequencyAnalysisServiceWebAudio {
     const frequencyData = new Uint8Array(analyser.frequencyBinCount);
     analyser.getByteFrequencyData(frequencyData);
 
-    return frequencyData;
+    // 周波数データの平均化処理
+    return this.smoothFrequencyData(frequencyData);
   }
 
   /**
@@ -266,9 +273,53 @@ export class FrequencyAnalysisServiceWebAudio {
   }
 
   /**
+   * 周波数データを平均化する
+   * @param currentData 現在の周波数データ
+   * @returns 平均化された周波数データ
+   */
+  private smoothFrequencyData(currentData: Uint8Array): Uint8Array {
+    // キューに現在のデータのコピーを追加
+    this.frequencyDataQueue.push(new Uint8Array(currentData));
+    
+    // キューのサイズを制限
+    if (this.frequencyDataQueue.length > this.maxQueueSize) {
+      this.frequencyDataQueue.shift();
+    }
+    
+    // キューが空の場合は現在のデータをそのまま返す
+    if (this.frequencyDataQueue.length === 0) {
+      return currentData;
+    }
+    
+    // 平均化されたデータを格納する配列
+    const smoothedData = new Uint8Array(currentData.length);
+    
+    // 各周波数ビンごとに平均値を計算
+    for (let i = 0; i < currentData.length; i++) {
+      let sum = 0;
+      let count = 0;
+      
+      // キュー内の全てのデータを加算
+      for (const data of this.frequencyDataQueue) {
+        if (i < data.length) {
+          sum += data[i];
+          count++;
+        }
+      }
+      
+      // 平均値を計算（0で割ることを防ぐ）
+      smoothedData[i] = count > 0 ? Math.round(sum / count) : 0;
+    }
+    
+    return smoothedData;
+  }
+
+  /**
    * リソースを解放する
    */
   dispose(): void {
+    // キューをクリア
+    this.frequencyDataQueue = [];
     if (this.workletNode) {
       this.workletNode.disconnect();
       this.workletNode = null;
