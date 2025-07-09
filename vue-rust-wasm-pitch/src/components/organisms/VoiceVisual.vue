@@ -127,17 +127,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted, watch } from "vue";
+import { ref, onUnmounted, watch, onMounted } from "vue";
 import PitchCanvas from "../atoms/PitchCanvas.vue";
 import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
 import { audioService, pitchDetectionService } from "../../services";
 import { VoiceTypeAnalysisService } from "../../services/VoiceTypeAnalysisService";
+import { frequencyAnalysisServiceWebAudio } from "../../services/FrequencyAnalysisServiceWebAudio";
 import RealtimeHeatMapCanvas from "../atoms/RealtimeHeatMapCanvas.vue";
 import FileHeatMapCanvas from "../atoms/FileHeatMapCanvas.vue";
 import AudioFileUploader from "../molecules/AudioFileUploader.vue";
 import MicrophoneInput from "../molecules/MicrophoneInput.vue";
 import VoiceTypeAnalysis from "../molecules/VoiceTypeAnalysis.vue";
-import fourierTransform from "fourier-transform";
 import type { VoiceTypeAnalysisResult } from "../../services/VoiceTypeAnalysisService";
 
 const activeTab = ref<string>("microphone");
@@ -231,23 +231,30 @@ const analyzeAudioFile = async (buffer: AudioBuffer) => {
     // ピッチ検出サービスを初期化
     await pitchDetectionService.initialize();
     
+    // 周波数分析サービスを初期化
+    await frequencyAnalysisServiceWebAudio.initialize(4096); // fftSizeを4096に設定
+    
     // 音声ファイルを分析
     const sampleRate = buffer.sampleRate;
     const bufferSize = 2048;
-    const hopSize = 1024;
+    const hopSize = 256; // hopSizeを256に設定
     const duration = buffer.duration;
     const numFrames = Math.floor((buffer.length - bufferSize) / hopSize) + 1;
     
     // 分析用の一時バッファ
     const tempBuffer = new Float32Array(bufferSize);
     
+    // バッチ処理で周波数データを取得
+    const { frequencyDataArray, timestamps } = await frequencyAnalysisServiceWebAudio.analyzeAudioBufferBatch(
+      buffer,
+      bufferSize,
+      hopSize
+    );
+    
     // 各フレームを分析
-    for (let i = 0; i < numFrames; i++) {
+    for (let i = 0; i < numFrames && i < frequencyDataArray.length; i++) {
       // フレームの開始位置
       const startSample = i * hopSize;
-      
-      // フレームの時間（秒）
-      const timestamp = startSample / sampleRate;
       
       // バッファにフレームのデータをコピー
       buffer.copyFromChannel(tempBuffer, 0, startSample);
@@ -255,23 +262,10 @@ const analyzeAudioFile = async (buffer: AudioBuffer) => {
       // ピッチを検出
       const pitch = pitchDetectionService.detectPitch(tempBuffer, sampleRate);
       
-      // 周波数スペクトルを計算
-      const spectrum = fourierTransform(tempBuffer);
-      const frequencyData = new Uint8Array(spectrum.length);
-      
-      // スペクトルをdB単位に変換し、0-255の範囲にスケーリング
-      for (let j = 0; j < spectrum.length; j++) {
-        const magnitude = spectrum[j];
-        // 0の場合はログが-Infinityになるので回避
-        const dB = magnitude > 0 ? 20 * Math.log10(magnitude) : -100;
-        const normalized = Math.max(0, Math.min(255, (dB + 100) * 2.55));
-        frequencyData[j] = normalized;
-      }
-      
       // 結果を保存
       analysisData.value.pitchData.push(pitch);
-      analysisData.value.frequencyData.push(frequencyData);
-      analysisData.value.timestamps.push(timestamp);
+      analysisData.value.frequencyData.push(new Uint8Array(frequencyDataArray[i])); // コピーを作成して保存
+      analysisData.value.timestamps.push(timestamps[i]);
     }
     
     console.log(`分析完了: ${numFrames}フレーム`);
@@ -361,6 +355,9 @@ const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffe
     // ピッチ検出サービスを初期化
     await pitchDetectionService.initialize();
     
+    // 周波数分析サービスを初期化
+    await frequencyAnalysisServiceWebAudio.initialize(4096); // fftSizeを4096に設定
+    
     // ボイスタイプ分析サービスのインスタンスを作成
     const voiceTypeAnalysisService = new VoiceTypeAnalysisService();
     
@@ -375,24 +372,26 @@ const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffe
       
       const sampleRate = buffer.sampleRate;
       const bufferSize = 2048;
-      const hopSize = 1024;
+      const hopSize = 512;
       const numFrames = Math.floor((buffer.length - bufferSize) / hopSize) + 1;
       
       // 分析用の一時バッファ
       const tempBuffer = new Float32Array(bufferSize);
       
+      // バッチ処理で周波数データを取得
+      const { frequencyDataArray, timestamps } = await frequencyAnalysisServiceWebAudio.analyzeAudioBufferBatch(
+        buffer,
+        bufferSize,
+        hopSize
+      );
+      
       // 結果を保存する配列
       const pitchData: number[] = [];
-      const frequencyDataArray: Uint8Array[] = [];
-      const timestamps: number[] = [];
       
       // 各フレームを分析
-      for (let i = 0; i < numFrames; i++) {
+      for (let i = 0; i < numFrames && i < frequencyDataArray.length; i++) {
         // フレームの開始位置
         const startSample = i * hopSize;
-        
-        // フレームの時間（秒）
-        const timestamp = startSample / sampleRate;
         
         // バッファにフレームのデータをコピー
         buffer.copyFromChannel(tempBuffer, 0, startSample);
@@ -400,23 +399,8 @@ const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffe
         // ピッチを検出
         const pitch = pitchDetectionService.detectPitch(tempBuffer, sampleRate);
         
-        // 周波数スペクトルを計算
-        const spectrum = fourierTransform(tempBuffer);
-        const frequencyData = new Uint8Array(spectrum.length);
-        
-        // スペクトルをdB単位に変換し、0-255の範囲にスケーリング
-        for (let j = 0; j < spectrum.length; j++) {
-          const magnitude = spectrum[j];
-          // 0の場合はログが-Infinityになるので回避
-          const dB = magnitude > 0 ? 20 * Math.log10(magnitude) : -100;
-          const normalized = Math.max(0, Math.min(255, (dB + 100) * 2.55));
-          frequencyData[j] = normalized;
-        }
-        
-        // 結果を保存（コピーを作成して保存）
+        // 結果を保存
         pitchData.push(pitch);
-        frequencyDataArray.push(new Uint8Array(frequencyData));
-        timestamps.push(timestamp);
       }
       
       // 音程ごとの結果を保存
@@ -424,7 +408,7 @@ const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffe
       pitchDataArrays[pitchId] = pitchData;
       timestampsArrays[pitchId] = timestamps;
       
-      console.log(`${pitchId}の分析完了: ${numFrames}フレーム`);
+      console.log(`${pitchId}の分析完了: ${frequencyDataArray.length}フレーム`);
     }
     
     // ボイスタイプを分析
@@ -447,11 +431,23 @@ const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffe
   }
 };
 
+// コンポーネントがマウントされたときの初期化
+onMounted(async () => {
+  try {
+    // 周波数分析サービスを初期化
+    await frequencyAnalysisServiceWebAudio.initialize();
+    console.log('周波数分析サービスが初期化されました');
+  } catch (error) {
+    console.error('周波数分析サービスの初期化に失敗しました:', error);
+  }
+});
+
 // コンポーネントがアンマウントされたときのクリーンアップ
 onUnmounted(() => {
   // リソースを解放
   pitchDetectionService.dispose();
   audioService.dispose();
+  frequencyAnalysisServiceWebAudio.dispose();
 });
 </script>
 
