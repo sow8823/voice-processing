@@ -2,8 +2,7 @@
  * 周波数分析を担当するサービス
  */
 export interface HarmonicAnalysisResult {
-  harmonic2Ratio: number;  // 2倍音の強度比率（%）
-  harmonic3Ratio: number;  // 3倍音の強度比率（%）
+  spectralSlope: number;   // スペクトル傾斜（傾斜が急であるほどライトチェスト寄り、ゆるやかであるほどプル,ミックス寄り）
   bandPeakRatio: number;   // 特定の周波数帯域（2.8kHz～3.2kHz）の最大成分比率（%）
 }
 
@@ -34,8 +33,7 @@ export class FrequencyAnalysisService {
     // 基本周波数が低すぎる場合は分析しない
     if (!baseFrequency || baseFrequency < 50) {
       return {
-        harmonic2Ratio: 0,
-        harmonic3Ratio: 0,
+        spectralSlope: 0,
         bandPeakRatio: 0
       };
     }
@@ -46,22 +44,71 @@ export class FrequencyAnalysisService {
     const baseIdx = this.getFrequencyIndex(baseFrequency, sampleRate, fftSize);
     const baseAmp = frequencyData[baseIdx] || 1; // ゼロ除算を防ぐため、最小値を1とする
     
-    // 2倍音のインデックスと振幅を計算
-    const harmonic2Idx = this.getFrequencyIndex(baseFrequency * 2, sampleRate, fftSize);
-    const harmonic2Amp = harmonic2Idx < frequencyData.length ? frequencyData[harmonic2Idx] : 0;
-    const harmonic2Ratio = (harmonic2Amp / baseAmp) * 100;
+    // スペクトル傾斜を計算（Spectral Slope = ∑(fi - f̄)² / ∑(fi - f̄)(Ai - Ā)）
     
-    // 3倍音のインデックスと振幅を計算
-    const harmonic3Idx = this.getFrequencyIndex(baseFrequency * 3, sampleRate, fftSize);
-    const harmonic3Amp = harmonic3Idx < frequencyData.length ? frequencyData[harmonic3Idx] : 0;
-    const harmonic3Ratio = (harmonic3Amp / baseAmp) * 100;
+    // 有効な周波数範囲を決定（ノイズを避けるため、基本周波数から上限までを考慮）
+    const slopeStartIdx = Math.max(1, baseIdx - 5); // 基本周波数の少し下から
+    const slopeEndIdx = Math.min(frequencyData.length - 1, this.getFrequencyIndex(baseFrequency * 10, sampleRate, fftSize)); // 基本周波数の10倍まで
+    
+    // 周波数と振幅の配列を作成
+    const frequencies: number[] = [];
+    const amplitudes: number[] = [];
+    
+    for (let i = slopeStartIdx; i <= slopeEndIdx; i++) {
+      // インデックスから周波数を計算
+      const frequency = (i / fftSize) * sampleRate;
+      // 対応する振幅を取得
+      const amplitude = frequencyData[i];
+      
+      // 有効なデータのみを追加
+      if (amplitude > 0) {
+        frequencies.push(frequency);
+        amplitudes.push(amplitude);
+      }
+    }
+    
+    // データが不足している場合は計算できない
+    if (frequencies.length < 2) {
+      return {
+        spectralSlope: 0,
+        bandPeakRatio: 0
+      };
+    }
+    
+    // 周波数と振幅の平均値を計算
+    const freqMean = frequencies.reduce((sum, val) => sum + val, 0) / frequencies.length;
+    const ampMean = amplitudes.reduce((sum, val) => sum + val, 0) / amplitudes.length;
+    
+    // 分子と分母を計算
+    let numerator = 0;   // ∑(fi - f̄)²
+    let denominator = 0; // ∑(fi - f̄)(Ai - Ā)
+    
+    for (let i = 0; i < frequencies.length; i++) {
+      const freqDiff = frequencies[i] - freqMean;
+      const ampDiff = amplitudes[i] - ampMean;
+      
+      numerator += freqDiff * freqDiff;
+      denominator += freqDiff * ampDiff;
+    }
+    
+    // ゼロ除算を防ぐ
+    let spectralSlope = 0;
+    if (denominator !== 0) {
+      spectralSlope = numerator / denominator;
+    }
+    
+    // 値を正規化（-1から1の範囲に収める）
+    spectralSlope = Math.max(-1, Math.min(1, spectralSlope / 10000));
+    
+    // 使いやすいように0-1の範囲に変換（1に近いほど傾斜が急）
+    spectralSlope = (1 - spectralSlope) / 2;
     
     // 2.8kHz～3.2kHzの周波数帯域の最大振幅を計算
-    const startIdx = this.getFrequencyIndex(2800, sampleRate, fftSize);
-    const endIdx = this.getFrequencyIndex(3200, sampleRate, fftSize);
+    const bandStartIdx = this.getFrequencyIndex(2800, sampleRate, fftSize);
+    const bandEndIdx = this.getFrequencyIndex(3200, sampleRate, fftSize);
     
     let maxAmp = 0;
-    for (let i = startIdx; i <= endIdx; i++) {
+    for (let i = bandStartIdx; i <= bandEndIdx; i++) {
       if (i < frequencyData.length && frequencyData[i] > maxAmp) {
         maxAmp = frequencyData[i];
       }
@@ -70,8 +117,7 @@ export class FrequencyAnalysisService {
     const bandPeakRatio = (maxAmp / baseAmp) * 100;
     
     return {
-      harmonic2Ratio,
-      harmonic3Ratio,
+      spectralSlope,
       bandPeakRatio
     };
   }

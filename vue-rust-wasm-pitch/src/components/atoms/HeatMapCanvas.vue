@@ -37,16 +37,16 @@
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">2倍音強度平均</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ harmonic2Avg.toFixed(1) }}%</div>
+            <div class="text-caption text-medium-emphasis">スペクトル傾斜平均</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ spectralSlopeAvg !== undefined ? (spectralSlopeAvg * 100).toFixed(1) : '0.0' }}%</div>
           </v-card-text>
         </v-card>
       </v-col>
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">3倍音強度平均</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ harmonic3Avg.toFixed(1) }}%</div>
+            <div class="text-caption text-medium-emphasis">スペクトル特性</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ spectralSlopeAvg !== undefined ? (spectralSlopeAvg > 0.5 ? '急' : '緩') : '-' }}</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -54,7 +54,7 @@
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
             <div class="text-caption text-medium-emphasis">2.8kHz~3.2kHz 最大成分平均</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ bandPeakAvg.toFixed(1) }}%</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ bandPeakAvg !== undefined ? bandPeakAvg.toFixed(1) : '0.0' }}%</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -476,8 +476,7 @@ const updateHeatmap = (frequencyData: Uint8Array) => {
 };
 
 // 比率を記録するキュー（過去5秒分を保存）
-const harmonic2Queue = ref<number[]>([]);
-const harmonic3Queue = ref<number[]>([]);
+const spectralSlopeQueue = ref<number[]>([]);
 const bandPeakQueue = ref<number[]>([]);
 
 const maxQueueSize = heatmapWidth; // ヒートマップの列数（約5秒分）
@@ -490,26 +489,20 @@ const getFrequencyIndex = (freq: number, sampleRate: number, fftSize: number) =>
 const updateHarmonicRatios = () => {
   if (!props.baseFrequency || props.baseFrequency < 50) return;
 
+  // FrequencyAnalysisServiceを使用してスペクトル傾斜を計算
+  const harmonicResult = frequencyAnalysisService.analyzeHarmonics(
+    props.frequencyData,
+    props.baseFrequency,
+    sampleRate
+  );
+
+  // スペクトル傾斜をキューに保存
+  spectralSlopeQueue.value.push(harmonicResult.spectralSlope);
+  if (spectralSlopeQueue.value.length > maxQueueSize) spectralSlopeQueue.value.shift();
+
   const fftSize = props.frequencyData.length * 2;
   const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
-  const harmonic2Idx = getFrequencyIndex(props.baseFrequency * 2, sampleRate, fftSize);
-  const harmonic3Idx = getFrequencyIndex(props.baseFrequency * 3, sampleRate, fftSize);
-
-  if (harmonic2Idx >= props.frequencyData.length || harmonic3Idx >= props.frequencyData.length) return;
-
   const baseAmp = props.frequencyData[baseIdx] || 1;
-  const harmonic2Amp = props.frequencyData[harmonic2Idx] || 0;
-  const harmonic3Amp = props.frequencyData[harmonic3Idx] || 0;
-
-  // 2倍音・3倍音比率をキューに保存
-  const harmonic2Ratio = (harmonic2Amp / baseAmp) * 100;
-  const harmonic3Ratio = (harmonic3Amp / baseAmp) * 100;
-
-  harmonic2Queue.value.push(harmonic2Ratio);
-  harmonic3Queue.value.push(harmonic3Ratio);
-
-  if (harmonic2Queue.value.length > maxQueueSize) harmonic2Queue.value.shift();
-  if (harmonic3Queue.value.length > maxQueueSize) harmonic3Queue.value.shift();
 
   // 2.8kHz~3.2kHz の最大比率をキューに保存
   const startIdx = getFrequencyIndex(2800, sampleRate, fftSize);
@@ -528,12 +521,8 @@ const updateHarmonicRatios = () => {
 };
 
 // 5秒間の平均を計算
-const harmonic2Avg = computed(() => {
-  return frequencyAnalysisService.calculateAverage(harmonic2Queue.value);
-});
-
-const harmonic3Avg = computed(() => {
-  return frequencyAnalysisService.calculateAverage(harmonic3Queue.value);
+const spectralSlopeAvg = computed(() => {
+  return frequencyAnalysisService.calculateAverage(spectralSlopeQueue.value);
 });
 
 const bandPeakAvg = computed(() => {
@@ -581,8 +570,7 @@ const resetHeatmap = () => {
   currentColumn = 0;
   
   // キューをクリア
-  harmonic2Queue.value = [];
-  harmonic3Queue.value = [];
+  spectralSlopeQueue.value = [];
   bandPeakQueue.value = [];
   
   // キャンバスをクリア

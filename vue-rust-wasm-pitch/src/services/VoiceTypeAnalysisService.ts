@@ -10,8 +10,7 @@ export interface VoiceTypeAnalysisResult {
   voiceType: VoiceType;
   confidence: number; // 0-1の範囲で分類の確信度
   parameters: {
-    harmonic2Ratio: number;
-    harmonic3Ratio: number;
+    spectralSlope: number; // スペクトル傾斜（傾斜が急であるほどライトチェスト寄り、ゆるやかであるほどプル,ミックス寄り）
     highFrequencyRatio: number;
     noiseRatio: number;
     // 新しいパラメータ
@@ -26,8 +25,7 @@ export interface VoiceTypeAnalysisResult {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
@@ -120,8 +118,7 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
@@ -164,8 +161,7 @@ export class VoiceTypeAnalysisService {
         voiceType: 'unknown',
         confidence: 0,
         parameters: {
-          harmonic2Ratio: 0,
-          harmonic3Ratio: 0,
+          spectralSlope: 0,
           highFrequencyRatio: 0,
           noiseRatio: 0
         },
@@ -233,8 +229,7 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
@@ -302,8 +297,7 @@ export class VoiceTypeAnalysisService {
         voiceType,
         confidence,
         parameters: {
-          harmonic2Ratio: harmonicResult.harmonic2Ratio,
-          harmonic3Ratio: harmonicResult.harmonic3Ratio,
+          spectralSlope: harmonicResult.spectralSlope,
           highFrequencyRatio,
           noiseRatio
         },
@@ -317,8 +311,7 @@ export class VoiceTypeAnalysisService {
         voiceType: 'unknown',
         confidence: 0,
         parameters: {
-          harmonic2Ratio: 0,
-          harmonic3Ratio: 0,
+          spectralSlope: 0,
           highFrequencyRatio: 0,
           noiseRatio: 0
         }
@@ -350,26 +343,21 @@ export class VoiceTypeAnalysisService {
     noiseRatio: number
   ): { voiceType: VoiceType; confidence: number } {
     // 各パラメータのスコアを計算（0-1の範囲）
-    const harmonic2Score = harmonicResult.harmonic2Ratio >= 70 ? 1 : harmonicResult.harmonic2Ratio / 70;
-    const harmonic3Score = harmonicResult.harmonic3Ratio >= 50 ? 1 : harmonicResult.harmonic3Ratio / 50;
+    // スペクトル傾斜は値が大きいほど傾斜が急（ライトチェスト寄り）、小さいほど傾斜がゆるやか（プル/ミックス寄り）
+    const spectralSlopeScore = harmonicResult.spectralSlope >= 0.7 ? 1 : harmonicResult.spectralSlope / 0.7;
     const highFreqScore = highFrequencyRatio >= 0.3 ? 1 : highFrequencyRatio / 0.3;
     const noiseScore = noiseRatio <= 0.2 ? 1 : 1 - ((noiseRatio - 0.2) / 0.8);
     
-    // プルボイスの条件スコア
-    const pullScore = (harmonic2Score + harmonic3Score + highFreqScore + (1 - noiseScore)) / 4;
+    // プルボイスの条件スコア（スペクトル傾斜がゆるやか、高周波成分が多い）
+    const pullScore = ((1 - spectralSlopeScore) + highFreqScore + (1 - noiseScore)) / 3;
     
-    // ライトチェストの条件スコア
-    const lightChestScore = (
-      (1 - harmonic2Score) + 
-      (1 - harmonic3Score) + 
-      (1 - highFreqScore) + 
-      noiseScore
-    ) / 4;
+    // ライトチェストの条件スコア（スペクトル傾斜が急、高周波成分が少ない）
+    const lightChestScore = (spectralSlopeScore + (1 - highFreqScore) + noiseScore) / 3;
 
     // フリップの条件スコア（声質の不安定さを検出）
     // フリップは特定の音程で声質が急激に変化する特徴がある
     // 単一音程の分析では完全には判定できないが、特徴的なパターンを検出する
-    const flipScore = Math.abs(harmonic2Score - 0.5) * Math.abs(highFreqScore - 0.5) * 2;
+    const flipScore = Math.abs(spectralSlopeScore - 0.5) * Math.abs(highFreqScore - 0.5) * 2;
     
     // 最も高いスコアを持つボイスタイプを判定
     const scores = [
@@ -406,8 +394,7 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
@@ -419,21 +406,19 @@ export class VoiceTypeAnalysisService {
   ): { voiceType: VoiceType; confidence: number } {
     // 各ボイスタイプのスコアを計算
     
-    // プルのスコア（高い倍音比率、フラット傾向、中程度の一貫性）
+    // プルのスコア（ゆるやかなスペクトル傾斜、フラット傾向、中程度の一貫性）
     const pullScore = (
-      this.getAverageParameter(pitchResults, 'harmonic2Ratio') / 100 +
-      this.getAverageParameter(pitchResults, 'harmonic3Ratio') / 100 +
+      (1 - this.getAverageParameter(pitchResults, 'spectralSlope')) * 2 +  // スペクトル傾斜がゆるやかなほど高スコア
       (1 - pitchAccuracy) * 2 +  // フラット傾向が強いほど高スコア
       Math.min(voiceConsistency * 0.5, 0.5)  // 一貫性は中程度が理想
     ) / 4;
     
-    // ライトチェストのスコア（低い倍音比率、高い基音比率、低い高周波数比率）
+    // ライトチェストのスコア（急なスペクトル傾斜、低い高周波数比率）
     const lightChestScore = (
-      (1 - this.getAverageParameter(pitchResults, 'harmonic2Ratio') / 100) +
-      (1 - this.getAverageParameter(pitchResults, 'harmonic3Ratio') / 100) +
+      this.getAverageParameter(pitchResults, 'spectralSlope') * 2 +  // スペクトル傾斜が急なほど高スコア
       (1 - this.getAverageParameter(pitchResults, 'highFrequencyRatio')) +
       Math.min(voiceConsistency * 0.7, 0.7)  // 一貫性はやや高め
-    ) / 4;
+    ) / 3;
     
     // フリップのスコア（声質変化が大きい、一貫性が低い）
     const flipScore = (
@@ -441,12 +426,12 @@ export class VoiceTypeAnalysisService {
       (1 - voiceConsistency) * 2  // 一貫性が低いほど高スコア
     ) / 2;
     
-    // ミックスのスコア（高い一貫性、高い3kHz周辺の強さ、良好な音程精度）
+    // ミックスのスコア（中程度のスペクトル傾斜、高い一貫性、高い3kHz周辺の強さ、良好な音程精度）
     const mixedScore = (
+      (1 - Math.abs(this.getAverageParameter(pitchResults, 'spectralSlope') - 0.5)) * 2 +  // スペクトル傾斜が中程度が理想
       voiceConsistency * 2 +  // 一貫性が高いほど高スコア
       brightness3kHz * 2 +  // 3kHz周辺が強いほど高スコア
-      pitchAccuracy +  // 音程精度が高いほど高スコア
-      this.getAverageParameter(pitchResults, 'harmonic2Ratio') / 100  // 倍音も豊か
+      pitchAccuracy  // 音程精度が高いほど高スコア
     ) / 5;
     
     // 最も高いスコアを持つボイスタイプを判定
@@ -484,8 +469,7 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
@@ -505,21 +489,17 @@ export class VoiceTypeAnalysisService {
       return 0;
     }
     
-    // 倍音構造の差を計算
-    const harmonic2Diff = Math.abs(
-      lowPitchResult.parameters.harmonic2Ratio - highPitchResult.parameters.harmonic2Ratio
-    ) / 100;
-    
-    const harmonic3Diff = Math.abs(
-      lowPitchResult.parameters.harmonic3Ratio - highPitchResult.parameters.harmonic3Ratio
-    ) / 100;
+    // スペクトル傾斜と高周波数比率の差を計算
+    const spectralSlopeDiff = Math.abs(
+      lowPitchResult.parameters.spectralSlope - highPitchResult.parameters.spectralSlope
+    );
     
     const highFreqDiff = Math.abs(
       lowPitchResult.parameters.highFrequencyRatio - highPitchResult.parameters.highFrequencyRatio
     );
     
     // 声質変化の度合いを計算（0-1）
-    const voiceQualityChange = (harmonic2Diff + harmonic3Diff + highFreqDiff) / 3;
+    const voiceQualityChange = (spectralSlopeDiff * 2 + highFreqDiff) / 2;
     
     return Math.min(1, voiceQualityChange);
   }
@@ -535,8 +515,7 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
@@ -559,25 +538,22 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
     }>
   ): number {
     // 各パラメータの標準偏差を計算
-    const harmonic2Values = Object.values(pitchResults).map(r => r.parameters.harmonic2Ratio);
-    const harmonic3Values = Object.values(pitchResults).map(r => r.parameters.harmonic3Ratio);
+    const spectralSlopeValues = Object.values(pitchResults).map(r => r.parameters.spectralSlope * 100); // スケーリングして計算
     const highFreqValues = Object.values(pitchResults).map(r => r.parameters.highFrequencyRatio * 100);
     
-    const harmonic2StdDev = this.calculateStandardDeviation(harmonic2Values);
-    const harmonic3StdDev = this.calculateStandardDeviation(harmonic3Values);
+    const spectralSlopeStdDev = this.calculateStandardDeviation(spectralSlopeValues);
     const highFreqStdDev = this.calculateStandardDeviation(highFreqValues);
     
     // 標準偏差が小さいほど一貫性が高い
     const maxStdDev = 30; // 最大想定標準偏差
-    const avgStdDev = (harmonic2StdDev + harmonic3StdDev + highFreqStdDev) / 3;
+    const avgStdDev = (spectralSlopeStdDev + highFreqStdDev) / 2;
     
     // 一貫性を計算（0-1）
     const consistency = 1 - Math.min(1, avgStdDev / maxStdDev);
@@ -595,8 +571,7 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
@@ -639,23 +614,20 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
     }>
   ): {
-    harmonic2Ratio: number;
-    harmonic3Ratio: number;
+    spectralSlope: number;
     highFrequencyRatio: number;
     noiseRatio: number;
   } {
     const results = Object.values(pitchResults);
     
     return {
-      harmonic2Ratio: this.getAverageParameter(pitchResults, 'harmonic2Ratio'),
-      harmonic3Ratio: this.getAverageParameter(pitchResults, 'harmonic3Ratio'),
+      spectralSlope: this.getAverageParameter(pitchResults, 'spectralSlope'),
       highFrequencyRatio: this.getAverageParameter(pitchResults, 'highFrequencyRatio'),
       noiseRatio: this.getAverageParameter(pitchResults, 'noiseRatio')
     };
@@ -678,13 +650,12 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
     }>,
-    paramName: 'harmonic2Ratio' | 'harmonic3Ratio' | 'highFrequencyRatio' | 'noiseRatio'
+    paramName: 'spectralSlope' | 'highFrequencyRatio' | 'noiseRatio'
   ): number {
     const values = Object.values(pitchResults).map(r => r.parameters[paramName]);
     if (values.length === 0) return 0;
@@ -783,8 +754,7 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
@@ -801,8 +771,7 @@ export class VoiceTypeAnalysisService {
     };
     
     // 各パラメータの合計値
-    let totalHarmonic2Ratio = 0;
-    let totalHarmonic3Ratio = 0;
+    let totalSpectralSlope = 0;
     let totalHighFrequencyRatio = 0;
     let totalNoiseRatio = 0;
     let totalConfidence = 0;
@@ -810,8 +779,7 @@ export class VoiceTypeAnalysisService {
     // 各セグメントの結果を集計
     for (const result of segmentResults) {
       typeCounts[result.voiceType]++;
-      totalHarmonic2Ratio += result.parameters.harmonic2Ratio;
-      totalHarmonic3Ratio += result.parameters.harmonic3Ratio;
+      totalSpectralSlope += result.parameters.spectralSlope;
       totalHighFrequencyRatio += result.parameters.highFrequencyRatio;
       totalNoiseRatio += result.parameters.noiseRatio;
       totalConfidence += result.confidence;
@@ -830,8 +798,7 @@ export class VoiceTypeAnalysisService {
     
     // 平均値を計算
     const count = segmentResults.length;
-    const avgHarmonic2Ratio = totalHarmonic2Ratio / count;
-    const avgHarmonic3Ratio = totalHarmonic3Ratio / count;
+    const avgSpectralSlope = totalSpectralSlope / count;
     const avgHighFrequencyRatio = totalHighFrequencyRatio / count;
     const avgNoiseRatio = totalNoiseRatio / count;
     const avgConfidence = totalConfidence / count;
@@ -841,8 +808,7 @@ export class VoiceTypeAnalysisService {
       voiceType: dominantType,
       confidence: avgConfidence,
       parameters: {
-        harmonic2Ratio: avgHarmonic2Ratio,
-        harmonic3Ratio: avgHarmonic3Ratio,
+        spectralSlope: avgSpectralSlope,
         highFrequencyRatio: avgHighFrequencyRatio,
         noiseRatio: avgNoiseRatio
       }
@@ -859,8 +825,7 @@ export class VoiceTypeAnalysisService {
       voiceType: VoiceType;
       confidence: number;
       parameters: {
-        harmonic2Ratio: number;
-        harmonic3Ratio: number;
+        spectralSlope: number;
         highFrequencyRatio: number;
         noiseRatio: number;
       };
@@ -963,35 +928,83 @@ export class VoiceTypeAnalysisService {
   ): HarmonicAnalysisResult {
     const fftSize = frequencyData.length * 2;
     
-    // 各周波数のインデックスを計算
+    // 基音周波数のインデックスを計算
     const baseIdx = Math.round((baseFrequency / sampleRate) * fftSize);
-    const harmonic2Idx = Math.round((harmonic2Frequency / sampleRate) * fftSize);
-    const harmonic3Idx = Math.round((harmonic3Frequency / sampleRate) * fftSize);
-    
-    // 各周波数の振幅を取得
-    const baseAmp = baseIdx < frequencyData.length ? frequencyData[baseIdx] : 0;
-    const harmonic2Amp = harmonic2Idx < frequencyData.length ? frequencyData[harmonic2Idx] : 0;
-    const harmonic3Amp = harmonic3Idx < frequencyData.length ? frequencyData[harmonic3Idx] : 0;
     
     // 基音の振幅が0の場合は0を返す（ゼロ除算を防ぐ）
+    const baseAmp = baseIdx < frequencyData.length ? frequencyData[baseIdx] : 0;
     if (baseAmp === 0) {
       return {
-        harmonic2Ratio: 0,
-        harmonic3Ratio: 0,
+        spectralSlope: 0,
         bandPeakRatio: 0
       };
     }
     
-    // 倍音比率を計算
-    const harmonic2Ratio = (harmonic2Amp / baseAmp) * 100;
-    const harmonic3Ratio = (harmonic3Amp / baseAmp) * 100;
+    // スペクトル傾斜を計算（Spectral Slope = ∑(fi - f̄)² / ∑(fi - f̄)(Ai - Ā)）
+    
+    // 有効な周波数範囲を決定（ノイズを避けるため、基本周波数から上限までを考慮）
+    const slopeStartIdx = Math.max(1, baseIdx - 5); // 基本周波数の少し下から
+    const slopeEndIdx = Math.min(frequencyData.length - 1, Math.round((baseFrequency * 10 / sampleRate) * fftSize)); // 基本周波数の10倍まで
+    
+    // 周波数と振幅の配列を作成
+    const frequencies: number[] = [];
+    const amplitudes: number[] = [];
+    
+    for (let i = slopeStartIdx; i <= slopeEndIdx; i++) {
+      // インデックスから周波数を計算
+      const frequency = (i / fftSize) * sampleRate;
+      // 対応する振幅を取得
+      const amplitude = frequencyData[i];
+      
+      // 有効なデータのみを追加
+      if (amplitude > 0) {
+        frequencies.push(frequency);
+        amplitudes.push(amplitude);
+      }
+    }
+    
+    // データが不足している場合は計算できない
+    if (frequencies.length < 2) {
+      return {
+        spectralSlope: 0,
+        bandPeakRatio: 0
+      };
+    }
+    
+    // 周波数と振幅の平均値を計算
+    const freqMean = frequencies.reduce((sum, val) => sum + val, 0) / frequencies.length;
+    const ampMean = amplitudes.reduce((sum, val) => sum + val, 0) / amplitudes.length;
+    
+    // 分子と分母を計算
+    let numerator = 0;   // ∑(fi - f̄)²
+    let denominator = 0; // ∑(fi - f̄)(Ai - Ā)
+    
+    for (let i = 0; i < frequencies.length; i++) {
+      const freqDiff = frequencies[i] - freqMean;
+      const ampDiff = amplitudes[i] - ampMean;
+      
+      numerator += freqDiff * freqDiff;
+      denominator += freqDiff * ampDiff;
+    }
+    
+    // ゼロ除算を防ぐ
+    let spectralSlope = 0;
+    if (denominator !== 0) {
+      spectralSlope = numerator / denominator;
+    }
+    
+    // 値を正規化（-1から1の範囲に収める）
+    spectralSlope = Math.max(-1, Math.min(1, spectralSlope / 10000));
+    
+    // 使いやすいように0-1の範囲に変換（1に近いほど傾斜が急）
+    spectralSlope = (1 - spectralSlope) / 2;
     
     // 3kHz周辺の周波数帯域の最大振幅を計算
-    const startIdx = Math.floor((2800 / sampleRate) * fftSize);
-    const endIdx = Math.ceil((3200 / sampleRate) * fftSize);
+    const bandStartIdx = Math.floor((2800 / sampleRate) * fftSize);
+    const bandEndIdx = Math.ceil((3200 / sampleRate) * fftSize);
     
     let maxAmp = 0;
-    for (let i = startIdx; i <= endIdx; i++) {
+    for (let i = bandStartIdx; i <= bandEndIdx; i++) {
       if (i >= 0 && i < frequencyData.length && frequencyData[i] > maxAmp) {
         maxAmp = frequencyData[i];
       }
@@ -1000,8 +1013,7 @@ export class VoiceTypeAnalysisService {
     const bandPeakRatio = (maxAmp / baseAmp) * 100;
     
     return {
-      harmonic2Ratio,
-      harmonic3Ratio,
+      spectralSlope,
       bandPeakRatio
     };
   }

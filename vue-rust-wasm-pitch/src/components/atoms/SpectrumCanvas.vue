@@ -7,16 +7,16 @@
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">2倍音強度</div>
-            <div class="text-h6 font-weight-bold secondary--text">{{ harmonic2Ratio.toFixed(1) }}%</div>
+            <div class="text-caption text-medium-emphasis">スペクトル傾斜</div>
+            <div class="text-h6 font-weight-bold secondary--text">{{ spectralSlope !== undefined ? (spectralSlope * 100).toFixed(1) : '0.0' }}%</div>
           </v-card-text>
         </v-card>
       </v-col>
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">3倍音強度</div>
-            <div class="text-h6 font-weight-bold secondary--text">{{ harmonic3Ratio.toFixed(1) }}%</div>
+            <div class="text-caption text-medium-emphasis">スペクトル特性</div>
+            <div class="text-h6 font-weight-bold secondary--text">{{ spectralSlope !== undefined ? (spectralSlope > 0.5 ? '急' : '緩') : '-' }}</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -24,7 +24,7 @@
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
             <div class="text-caption text-medium-emphasis">2.8kHz~3.2kHz 最大成分</div>
-            <div class="text-h6 font-weight-bold secondary--text">{{ bandPeakRatio.toFixed(1) }}%</div>
+            <div class="text-h6 font-weight-bold secondary--text">{{ bandPeakRatio !== undefined ? bandPeakRatio.toFixed(1) : '0.0' }}%</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -228,14 +228,9 @@ const harmonicAnalysis = computed(() => {
   );
 });
 
-// 2倍音の強度比率
-const harmonic2Ratio = computed(() => {
-  return harmonicAnalysis.value.harmonic2Ratio;
-});
-
-// 3倍音の強度比率
-const harmonic3Ratio = computed(() => {
-  return harmonicAnalysis.value.harmonic3Ratio;
+// スペクトル傾斜
+const spectralSlope = computed(() => {
+  return harmonicAnalysis.value.spectralSlope;
 });
 
 // 特定の周波数帯域の最大成分比率
