@@ -343,8 +343,10 @@ export class VoiceTypeAnalysisService {
     noiseRatio: number
   ): { voiceType: VoiceType; confidence: number } {
     // 各パラメータのスコアを計算（0-1の範囲）
-    // スペクトル傾斜は値が大きいほど傾斜が急（ライトチェスト寄り）、小さいほど傾斜がゆるやか（プル/ミックス寄り）
-    const spectralSlopeScore = harmonicResult.spectralSlope >= 0.7 ? 1 : harmonicResult.spectralSlope / 0.7;
+    // スペクトル傾斜（dB/oct）は値が大きい（-6に近い）ほど地声（ライトチェスト）寄り、小さい（-18に近い）ほど裏声（プル）寄り
+    // -6～-10: 地声、-10～-13: 中間、-13～-18: 裏声
+    const spectralSlopeNormalized = (harmonicResult.spectralSlope + 18) / 12; // -18～-6を0～1に正規化
+    const spectralSlopeScore = Math.min(1, Math.max(0, spectralSlopeNormalized));
     const highFreqScore = highFrequencyRatio >= 0.3 ? 1 : highFrequencyRatio / 0.3;
     const noiseScore = noiseRatio <= 0.2 ? 1 : 1 - ((noiseRatio - 0.2) / 0.8);
     
@@ -406,16 +408,16 @@ export class VoiceTypeAnalysisService {
   ): { voiceType: VoiceType; confidence: number } {
     // 各ボイスタイプのスコアを計算
     
-    // プルのスコア（ゆるやかなスペクトル傾斜、フラット傾向、中程度の一貫性）
+    // プルのスコア（急なスペクトル傾斜（-13～-18 dB/oct）、フラット傾向、中程度の一貫性）
     const pullScore = (
-      (1 - this.getAverageParameter(pitchResults, 'spectralSlope')) * 2 +  // スペクトル傾斜がゆるやかなほど高スコア
+      this.calculateSpectralSlopeScore(pitchResults, -18, -13) * 2 +  // スペクトル傾斜が-13～-18 dB/octほど高スコア
       (1 - pitchAccuracy) * 2 +  // フラット傾向が強いほど高スコア
       Math.min(voiceConsistency * 0.5, 0.5)  // 一貫性は中程度が理想
     ) / 4;
     
-    // ライトチェストのスコア（急なスペクトル傾斜、低い高周波数比率）
+    // ライトチェストのスコア（緩やかなスペクトル傾斜（-6～-10 dB/oct）、低い高周波数比率）
     const lightChestScore = (
-      this.getAverageParameter(pitchResults, 'spectralSlope') * 2 +  // スペクトル傾斜が急なほど高スコア
+      this.calculateSpectralSlopeScore(pitchResults, -10, -6) * 2 +  // スペクトル傾斜が-6～-10 dB/octほど高スコア
       (1 - this.getAverageParameter(pitchResults, 'highFrequencyRatio')) +
       Math.min(voiceConsistency * 0.7, 0.7)  // 一貫性はやや高め
     ) / 3;
@@ -426,9 +428,9 @@ export class VoiceTypeAnalysisService {
       (1 - voiceConsistency) * 2  // 一貫性が低いほど高スコア
     ) / 2;
     
-    // ミックスのスコア（中程度のスペクトル傾斜、高い一貫性、高い3kHz周辺の強さ、良好な音程精度）
+    // ミックスのスコア（中程度のスペクトル傾斜（-10～-13 dB/oct）、高い一貫性、高い3kHz周辺の強さ、良好な音程精度）
     const mixedScore = (
-      (1 - Math.abs(this.getAverageParameter(pitchResults, 'spectralSlope') - 0.5)) * 2 +  // スペクトル傾斜が中程度が理想
+      this.calculateSpectralSlopeScore(pitchResults, -13, -10) * 2 +  // スペクトル傾斜が-10～-13 dB/octほど高スコア
       voiceConsistency * 2 +  // 一貫性が高いほど高スコア
       brightness3kHz * 2 +  // 3kHz周辺が強いほど高スコア
       pitchAccuracy  // 音程精度が高いほど高スコア
@@ -660,6 +662,48 @@ export class VoiceTypeAnalysisService {
     const values = Object.values(pitchResults).map(r => r.parameters[paramName]);
     if (values.length === 0) return 0;
     return values.reduce((sum, val) => sum + val, 0) / values.length;
+  }
+
+  /**
+   * スペクトル傾斜のスコアを計算する
+   * @param pitchResults 各音程の分析結果
+   * @param minSlope 最小スペクトル傾斜（dB/oct）
+   * @param maxSlope 最大スペクトル傾斜（dB/oct）
+   * @returns スコア（0-1）
+   */
+  calculateSpectralSlopeScore(
+    pitchResults: Record<string, {
+      voiceType: VoiceType;
+      confidence: number;
+      parameters: {
+        spectralSlope: number;
+        highFrequencyRatio: number;
+        noiseRatio: number;
+      };
+    }>,
+    minSlope: number,
+    maxSlope: number
+  ): number {
+    // 平均スペクトル傾斜を取得
+    const avgSlope = this.getAverageParameter(pitchResults, 'spectralSlope');
+    
+    // スペクトル傾斜が範囲内にあるかどうかを判定
+    if (avgSlope >= minSlope && avgSlope <= maxSlope) {
+      // 範囲内の場合、中心からの距離に基づいてスコアを計算
+      const center = (minSlope + maxSlope) / 2;
+      const distance = Math.abs(avgSlope - center);
+      const maxDistance = (maxSlope - minSlope) / 2;
+      
+      // 中心に近いほどスコアが高い（1に近い）
+      return 1 - (distance / maxDistance);
+    } else {
+      // 範囲外の場合、範囲の端からの距離に基づいてスコアを減少
+      const closestBound = avgSlope < minSlope ? minSlope : maxSlope;
+      const distance = Math.abs(avgSlope - closestBound);
+      
+      // 距離が大きいほどスコアが低い（0に近い）
+      return Math.max(0, 1 - (distance / 5)); // 5 dB/octを超える距離でスコアは0になる
+    }
   }
 
   /**
@@ -940,15 +984,15 @@ export class VoiceTypeAnalysisService {
       };
     }
     
-    // スペクトル傾斜を計算（Spectral Slope = ∑(fi - f̄)² / ∑(fi - f̄)(Ai - Ā)）
+    // スペクトル傾斜を計算（dB/oct単位）
     
     // 有効な周波数範囲を決定（ノイズを避けるため、基本周波数から上限までを考慮）
     const slopeStartIdx = Math.max(1, baseIdx - 5); // 基本周波数の少し下から
     const slopeEndIdx = Math.min(frequencyData.length - 1, Math.round((baseFrequency * 10 / sampleRate) * fftSize)); // 基本周波数の10倍まで
     
-    // 周波数と振幅の配列を作成
+    // 周波数と振幅の配列を作成（対数スケールに変換）
     const frequencies: number[] = [];
-    const amplitudes: number[] = [];
+    const amplitudesDB: number[] = [];
     
     for (let i = slopeStartIdx; i <= slopeEndIdx; i++) {
       // インデックスから周波数を計算
@@ -958,46 +1002,43 @@ export class VoiceTypeAnalysisService {
       
       // 有効なデータのみを追加
       if (amplitude > 0) {
-        frequencies.push(frequency);
-        amplitudes.push(amplitude);
+        // 周波数をオクターブスケールに変換（log2）
+        frequencies.push(Math.log2(frequency));
+        // 振幅をdBスケールに変換（20 * log10）
+        amplitudesDB.push(20 * Math.log10(amplitude / 255));
       }
     }
     
     // データが不足している場合は計算できない
     if (frequencies.length < 2) {
       return {
-        spectralSlope: 0,
+        spectralSlope: -10, // デフォルト値として中間的な値を設定
         bandPeakRatio: 0
       };
     }
     
-    // 周波数と振幅の平均値を計算
-    const freqMean = frequencies.reduce((sum, val) => sum + val, 0) / frequencies.length;
-    const ampMean = amplitudes.reduce((sum, val) => sum + val, 0) / amplitudes.length;
+    // 線形回帰で傾きを計算
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumX2 = 0;
+    const n = frequencies.length;
     
-    // 分子と分母を計算
-    let numerator = 0;   // ∑(fi - f̄)²
-    let denominator = 0; // ∑(fi - f̄)(Ai - Ā)
-    
-    for (let i = 0; i < frequencies.length; i++) {
-      const freqDiff = frequencies[i] - freqMean;
-      const ampDiff = amplitudes[i] - ampMean;
-      
-      numerator += freqDiff * freqDiff;
-      denominator += freqDiff * ampDiff;
+    for (let i = 0; i < n; i++) {
+      sumX += frequencies[i];
+      sumY += amplitudesDB[i];
+      sumXY += frequencies[i] * amplitudesDB[i];
+      sumX2 += frequencies[i] * frequencies[i];
     }
     
-    // ゼロ除算を防ぐ
+    // 傾き（dB/oct）を計算
     let spectralSlope = 0;
-    if (denominator !== 0) {
-      spectralSlope = numerator / denominator;
+    if ((n * sumX2 - sumX * sumX) !== 0) {
+      spectralSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
     }
     
-    // 値を正規化（-1から1の範囲に収める）
-    spectralSlope = Math.max(-1, Math.min(1, spectralSlope / 10000));
-    
-    // 使いやすいように0-1の範囲に変換（1に近いほど傾斜が急）
-    spectralSlope = (1 - spectralSlope) / 2;
+    // 値を範囲内に制限（-6～-18 dB/oct）
+    spectralSlope = Math.max(-18, Math.min(-6, spectralSlope));
     
     // 3kHz周辺の周波数帯域の最大振幅を計算
     const bandStartIdx = Math.floor((2800 / sampleRate) * fftSize);

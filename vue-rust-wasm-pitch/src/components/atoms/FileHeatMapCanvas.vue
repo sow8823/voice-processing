@@ -38,15 +38,15 @@
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
             <div class="text-caption text-medium-emphasis">スペクトル傾斜平均</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ spectralSlopeAvg !== undefined ? (spectralSlopeAvg * 100).toFixed(1) : '0.0' }}%</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ spectralSlopeAvg !== undefined ? spectralSlopeAvg.toFixed(1) : '0.0' }} dB/oct</div>
           </v-card-text>
         </v-card>
       </v-col>
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">スペクトル特性</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ spectralSlopeAvg !== undefined ? (spectralSlopeAvg > 0.5 ? '急' : '緩') : '-' }}</div>
+            <div class="text-caption text-medium-emphasis">声区推定</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ getVoiceTypeFromSlope(spectralSlopeAvg) }}</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -323,7 +323,7 @@ const updateHeatmap = () => {
   }
   
   // ファイルの実際の長さを示す縦線（ファイルが10秒未満の場合）
-  if (props.duration < displayDuration) {
+  if (props.duration && props.duration < displayDuration) {
     const fileEndX = Math.floor(props.duration * timeResolution);
     
     // ファイル終了位置に縦線を描画
@@ -341,7 +341,7 @@ const updateHeatmap = () => {
   }
   
   // 現在の再生位置を示す白いラインを描画
-  if (props.currentPlaybackTime !== undefined && props.duration > 0) {
+  if (props.currentPlaybackTime !== undefined && props.duration && props.duration > 0) {
     // 再生位置が表示範囲内かチェック
     if (props.currentPlaybackTime >= viewStartTime.value && props.currentPlaybackTime <= viewEndTime.value) {
       // 表示範囲内での相対位置を計算
@@ -357,6 +357,21 @@ const updateHeatmap = () => {
     }
   }
 };
+
+// スペクトル傾斜から声区を推定する関数
+function getVoiceTypeFromSlope(slope: number | undefined): string {
+  if (slope === undefined) return '-';
+  
+  if (slope >= -10 && slope <= -6) {
+    return '地声';
+  } else if (slope > -13 && slope < -10) {
+    return '中間';
+  } else if (slope >= -18 && slope <= -13) {
+    return '裏声';
+  } else {
+    return '不明';
+  }
+}
 
 // 比率を記録するキュー（過去5秒分を保存）
 const spectralSlopeQueue = ref<number[]>([]);

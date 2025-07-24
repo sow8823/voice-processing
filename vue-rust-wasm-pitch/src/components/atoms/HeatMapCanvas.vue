@@ -38,15 +38,15 @@
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
             <div class="text-caption text-medium-emphasis">スペクトル傾斜平均</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ spectralSlopeAvg !== undefined ? (spectralSlopeAvg * 100).toFixed(1) : '0.0' }}%</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ spectralSlopeAvg !== undefined ? spectralSlopeAvg.toFixed(1) : '0.0' }} dB/oct</div>
           </v-card-text>
         </v-card>
       </v-col>
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">スペクトル特性</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ spectralSlopeAvg !== undefined ? (spectralSlopeAvg > 0.5 ? '急' : '緩') : '-' }}</div>
+            <div class="text-caption text-medium-emphasis">声区推定</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ getVoiceTypeFromSlope(spectralSlopeAvg) }}</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -635,6 +635,21 @@ defineExpose({
   resetHeatmap,
   adjustScrollToPlaybackTime
 });
+
+// スペクトル傾斜から声区を推定する関数
+function getVoiceTypeFromSlope(slope: number | undefined): string {
+  if (slope === undefined) return '-';
+  
+  if (slope >= -10 && slope <= -6) {
+    return '地声';
+  } else if (slope > -13 && slope < -10) {
+    return '中間';
+  } else if (slope >= -18 && slope <= -13) {
+    return '裏声';
+  } else {
+    return '不明';
+  }
+}
 </script>
 
 <style scoped>
