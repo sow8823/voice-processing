@@ -159,9 +159,20 @@ export class FrequencyAnalysisService {
       
       // 範囲内の最大値を取得
       let maxValue = 0;
-      for (let i = startIdx; i < endIdx; i++) {
-        if (i < filteredData.length && filteredData[i] > maxValue) {
-          maxValue = filteredData[i];
+      
+      // startIdxとendIdxが同じ場合（データ範囲が空の場合）は、
+      // 最も近い有効なデータポイントを使用する
+      if (startIdx === endIdx) {
+        // そのインデックスの値を直接使用
+        if (startIdx < filteredData.length) {
+          maxValue = filteredData[startIdx];
+        }
+      } else {
+        // 通常通り範囲内の最大値を取得
+        for (let i = startIdx; i < endIdx; i++) {
+          if (i < filteredData.length && filteredData[i] > maxValue) {
+            maxValue = filteredData[i];
+          }
         }
       }
       
