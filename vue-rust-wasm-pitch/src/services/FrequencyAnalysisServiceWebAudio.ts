@@ -161,6 +161,14 @@ export class FrequencyAnalysisServiceWebAudio {
    * @param hopSize ホップサイズ
    * @returns 周波数データの配列（Uint8Array[]）とタイムスタンプの配列（number[]）
    */
+  /**
+   * 音声バッファから周波数データを取得する（バッチ処理用）
+   * 時間軸方向の平滑化を強化するために、移動平均フィルタを適用
+   * @param audioBuffer 分析する音声バッファ
+   * @param bufferSize バッファサイズ
+   * @param hopSize ホップサイズ
+   * @returns 周波数データの配列（Uint8Array[]）とタイムスタンプの配列（number[]）
+   */
   async analyzeAudioBufferBatch(
     audioBuffer: AudioBuffer,
     bufferSize: number = 2048,
@@ -171,7 +179,7 @@ export class FrequencyAnalysisServiceWebAudio {
     }
 
     // 分析結果を格納する配列
-    const frequencyDataArray: Uint8Array[] = [];
+    const rawFrequencyDataArray: Uint8Array[] = [];
     const timestamps: number[] = [];
 
     // フレーム数を計算
@@ -186,7 +194,7 @@ export class FrequencyAnalysisServiceWebAudio {
       const timestamp = startSample / audioBuffer.sampleRate;
       
       try {
-        // 周波数データを取得
+        // 周波数データを取得（この時点では時間軸方向の平滑化は最小限）
         const frequencyData = await this.getFrequencyDataFromBuffer(
           audioBuffer,
           startSample,
@@ -194,14 +202,45 @@ export class FrequencyAnalysisServiceWebAudio {
         );
         
         // 結果を保存
-        frequencyDataArray.push(new Uint8Array(frequencyData));
+        rawFrequencyDataArray.push(new Uint8Array(frequencyData));
         timestamps.push(timestamp);
       } catch (error) {
         console.error(`フレーム ${i} の分析に失敗しました:`, error);
       }
     }
     
-    return { frequencyDataArray, timestamps };
+    // 時間軸方向の平滑化を強化するための移動平均フィルタ
+    const smoothedFrequencyDataArray: Uint8Array[] = [];
+    const windowSize = 5; // 移動平均のウィンドウサイズ
+    
+    for (let i = 0; i < rawFrequencyDataArray.length; i++) {
+      // 現在のフレームを中心とする前後のフレームを取得
+      const startIdx = Math.max(0, i - Math.floor(windowSize / 2));
+      const endIdx = Math.min(rawFrequencyDataArray.length - 1, i + Math.floor(windowSize / 2));
+      
+      // 平均化するフレームの数
+      const count = endIdx - startIdx + 1;
+      
+      // 平均化されたデータを格納する配列
+      const smoothedData = new Uint8Array(rawFrequencyDataArray[i].length);
+      
+      // 各周波数ビンごとに平均値を計算
+      for (let j = 0; j < smoothedData.length; j++) {
+        let sum = 0;
+        
+        // 時間軸方向の平均化（周波数軸方向の平滑化は行わない）
+        for (let k = startIdx; k <= endIdx; k++) {
+          sum += rawFrequencyDataArray[k][j];
+        }
+        
+        // 平均値を計算
+        smoothedData[j] = Math.round(sum / count);
+      }
+      
+      smoothedFrequencyDataArray.push(smoothedData);
+    }
+    
+    return { frequencyDataArray: smoothedFrequencyDataArray, timestamps };
   }
 
   /**

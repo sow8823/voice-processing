@@ -127,6 +127,15 @@ export class FrequencyAnalysisService {
    * @param sampleRate サンプリングレート
    * @returns スケーリングされた周波数データ
    */
+  /**
+   * 周波数データを指定された高さにスケーリングする
+   * 周波数軸方向の平滑化を完全に解除するため、各ピクセルに対応する範囲の最大値を使用
+   * @param frequencyData 元の周波数データ
+   * @param targetHeight 目標の高さ
+   * @param maxFrequency 最大周波数（Hz）
+   * @param sampleRate サンプリングレート
+   * @returns スケーリングされた周波数データ
+   */
   scaleFrequencyData(
     frequencyData: Uint8Array,
     targetHeight: number,
@@ -138,13 +147,26 @@ export class FrequencyAnalysisService {
     const filteredData = frequencyData.slice(0, dataLength);
     
     const scaledData = new Uint8Array(targetHeight);
-    const scaleFactor = filteredData.length / targetHeight;
     
+    // 各ピクセルに対応する元データの範囲を計算し、その範囲内の最大値を使用
     for (let y = 0; y < targetHeight; y++) {
       // 周波数を反転させる（低周波数が下、高周波数が上）
       const invertedY = targetHeight - y - 1;
-      const sourceIndex = Math.floor(y * scaleFactor);
-      scaledData[invertedY] = filteredData[sourceIndex];
+      
+      // このピクセルに対応する元データの範囲を計算
+      const startIdx = Math.floor((y / targetHeight) * filteredData.length);
+      const endIdx = Math.floor(((y + 1) / targetHeight) * filteredData.length);
+      
+      // 範囲内の最大値を取得
+      let maxValue = 0;
+      for (let i = startIdx; i < endIdx; i++) {
+        if (i < filteredData.length && filteredData[i] > maxValue) {
+          maxValue = filteredData[i];
+        }
+      }
+      
+      // 最大値を使用（平滑化なし、ピークを保持）
+      scaledData[invertedY] = maxValue;
     }
     
     return scaledData;
