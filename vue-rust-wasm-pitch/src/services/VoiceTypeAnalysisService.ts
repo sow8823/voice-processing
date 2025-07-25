@@ -147,8 +147,10 @@ export class VoiceTypeAnalysisService {
     );
     
     // スペクトル傾斜による判定
-    const isChestBySlope = harmonicResult.spectralSlope >= -10;
-    const isFalsettoBySlope = harmonicResult.spectralSlope <= -13;
+    // 値範囲の制限を考慮して判定
+    const spectralSlope = harmonicResult.spectralSlope;
+    const isChestBySlope = spectralSlope >= -10;
+    const isFalsettoBySlope = spectralSlope < -10;
     
     // 2. 高周波成分の強度チェック
     const baseIdx = Math.round((baseFrequency / sampleRate) * (frequencyData.length * 2));
@@ -1476,8 +1478,8 @@ export class VoiceTypeAnalysisService {
       spectralSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
     }
     
-    // 値を範囲内に制限（-6～-18 dB/oct）
-    spectralSlope = Math.max(-18, Math.min(-6, spectralSlope));
+    // 値範囲の制限をなくすと、外れ値に対応できなくなる可能性があるため、制限を維持
+    spectralSlope = Math.max(-30, Math.min(-2, spectralSlope));
     
     // 3kHz周辺の周波数帯域の最大振幅を計算
     const bandStartIdx = Math.floor((2800 / sampleRate) * fftSize);

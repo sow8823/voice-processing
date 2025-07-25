@@ -266,11 +266,11 @@ watch(spectrumCanvas, (canvas) => {
 function getVoiceTypeFromSlope(slope: number | undefined): string {
   if (slope === undefined) return '-';
   
-  if (slope >= -10 && slope <= -6) {
+   if (slope >= -10 && slope <= -2) {
     return '地声';
   } else if (slope > -13 && slope < -10) {
     return '中間';
-  } else if (slope >= -18 && slope <= -13) {
+  } else if (slope >= -30 && slope <= -13) {
     return '裏声';
   } else {
     return '不明';

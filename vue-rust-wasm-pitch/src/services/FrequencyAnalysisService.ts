@@ -97,8 +97,8 @@ export class FrequencyAnalysisService {
       spectralSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
     }
     
-    // 値を範囲内に制限（-3～-18 dB/oct）
-    // spectralSlope = Math.max(-18, Math.min(-3, spectralSlope));
+    // 値を範囲内に制限（-6～-18 dB/oct）
+    spectralSlope = Math.max(-30, Math.min(-2, spectralSlope));
     
     // 2.8kHz～3.2kHzの周波数帯域の最大振幅を計算
     const bandStartIdx = this.getFrequencyIndex(2800, sampleRate, fftSize);
