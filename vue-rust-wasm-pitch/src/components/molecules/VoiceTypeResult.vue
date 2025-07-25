@@ -10,16 +10,6 @@
         <v-row>
           <!-- 声質タイプの表示 -->
           <v-col cols="12" class="text-center">
-            <div class="mb-2">
-              <v-chip
-                size="small"
-                color="primary"
-                class="mb-2"
-              >
-                <v-icon start>mdi-music-note</v-icon>
-                <span>分析音高: {{ selectedNote || 'A4' }} ({{ noteFrequencyMap[selectedNote || 'A4'] }} Hz)</span>
-              </v-chip>
-            </div>
             
             <v-chip
               size="x-large"
@@ -30,17 +20,6 @@
               <span class="text-h6">{{ getVoiceTypeName(analysisResult.voiceType) }}</span>
             </v-chip>
             
-            <!-- 確信度表示 -->
-            <div class="mt-2">
-              <span class="text-subtitle-1">確信度: {{ Math.round(analysisResult.confidence * 100) }}%</span>
-              <v-progress-linear
-                :model-value="analysisResult.confidence * 100"
-                :color="getVoiceTypeColor(analysisResult.voiceType)"
-                height="10"
-                rounded
-                class="mt-2"
-              ></v-progress-linear>
-            </div>
           </v-col>
           
           <!-- パラメータ表示 -->
@@ -52,53 +31,21 @@
               </v-card-title>
               
               <v-list>
-                <v-list-item>
-                  <template v-slot:prepend>
-                    <v-icon>mdi-sine-wave</v-icon>
-                  </template>
-                  <v-list-item-title>第2倍音/基本周波数比率</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round(analysisResult.parameters.harmonic2Ratio) }}%
-                    <v-progress-linear
-                      :model-value="Math.min(100, analysisResult.parameters.harmonic2Ratio)"
-                      color="primary"
-                      height="5"
-                      class="mt-1"
-                    ></v-progress-linear>
-                  </v-list-item-subtitle>
-                </v-list-item>
-                
-                <v-list-item>
-                  <template v-slot:prepend>
-                    <v-icon>mdi-sine-wave</v-icon>
-                  </template>
-                  <v-list-item-title>第3倍音/基本周波数比率</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round(analysisResult.parameters.harmonic3Ratio) }}%
-                    <v-progress-linear
-                      :model-value="Math.min(100, analysisResult.parameters.harmonic3Ratio)"
-                      color="primary"
-                      height="5"
-                      class="mt-1"
-                    ></v-progress-linear>
-                  </v-list-item-subtitle>
-                </v-list-item>
-                
-                <v-list-item>
-                  <template v-slot:prepend>
-                    <v-icon>mdi-chart-bell-curve</v-icon>
-                  </template>
-                  <v-list-item-title>高周波数帯域エネルギー比率</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round(analysisResult.parameters.highFrequencyRatio * 100) }}%
-                    <v-progress-linear
-                      :model-value="analysisResult.parameters.highFrequencyRatio * 100"
-                      color="primary"
-                      height="5"
-                      class="mt-1"
-                    ></v-progress-linear>
-                  </v-list-item-subtitle>
-                </v-list-item>
+               <v-list-item>
+                 <template v-slot:prepend>
+                   <v-icon>mdi-chart-line-variant</v-icon>
+                 </template>
+                 <v-list-item-title>スペクトル傾斜</v-list-item-title>
+                 <v-list-item-subtitle>
+                   {{ Math.round(analysisResult.parameters.spectralSlope) }} dB/oct
+                   <v-progress-linear
+                     :model-value="Math.min(100, Math.abs((analysisResult.parameters.spectralSlope + 18) / 12 * 100))"
+                     color="primary"
+                     height="5"
+                     class="mt-1"
+                   ></v-progress-linear>
+                 </v-list-item-subtitle>
+               </v-list-item>
                 
                 <v-list-item>
                   <template v-slot:prepend>
@@ -117,21 +64,6 @@
                 </v-list-item>
 
                 <!-- 新しいパラメータ（存在する場合のみ表示） -->
-                <v-list-item v-if="analysisResult.parameters.voiceConsistency !== undefined">
-                  <template v-slot:prepend>
-                    <v-icon>mdi-tune-vertical</v-icon>
-                  </template>
-                  <v-list-item-title>声質の一貫性</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round(analysisResult.parameters.voiceConsistency * 100) }}%
-                    <v-progress-linear
-                      :model-value="analysisResult.parameters.voiceConsistency * 100"
-                      color="primary"
-                      height="5"
-                      class="mt-1"
-                    ></v-progress-linear>
-                  </v-list-item-subtitle>
-                </v-list-item>
 
                 <v-list-item v-if="analysisResult.parameters.voiceQualityChange !== undefined">
                   <template v-slot:prepend>
@@ -142,6 +74,22 @@
                     {{ Math.round(analysisResult.parameters.voiceQualityChange * 100) }}%
                     <v-progress-linear
                       :model-value="analysisResult.parameters.voiceQualityChange * 100"
+                      color="primary"
+                      height="5"
+                      class="mt-1"
+                    ></v-progress-linear>
+                  </v-list-item-subtitle>
+                </v-list-item>
+
+                <v-list-item v-if="analysisResult.parameters.pitchAccuracy !== undefined">
+                  <template v-slot:prepend>
+                    <v-icon>mdi-music-accidental-sharp</v-icon>
+                  </template>
+                  <v-list-item-title>音程精度</v-list-item-title>
+                  <v-list-item-subtitle>
+                    {{ Math.round(analysisResult.parameters.pitchAccuracy * 100) }}%
+                    <v-progress-linear
+                      :model-value="analysisResult.parameters.pitchAccuracy * 100"
                       color="primary"
                       height="5"
                       class="mt-1"
