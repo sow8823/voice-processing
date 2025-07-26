@@ -238,6 +238,16 @@ const bandPeakRatio = computed(() => {
   return harmonicAnalysis.value.bandPeakRatio;
 });
 
+// 2.5kHzから6kHzの範囲の高周波成分比率
+const highFreqRatio = computed(() => {
+  return harmonicAnalysis.value.highFreqRatio;
+});
+
+// 高周波成分が基音の3分の1以上あるかどうか
+const hasStrongHighFreq = computed(() => {
+  return highFreqRatio.value >= 33.3; // 基音の3分の1（33.3%）以上
+});
+
 // テーマが変更されたときに再描画
 watch(() => theme.global.current.value, () => {
   drawFrequencySpectrum(props.frequencyData);
@@ -262,11 +272,18 @@ watch(spectrumCanvas, (canvas) => {
   }
 });
 
-// スペクトル傾斜から声区を推定する関数
+// スペクトル傾斜と高周波成分から声区を推定する関数
 function getVoiceTypeFromSlope(slope: number | undefined): string {
   if (slope === undefined) return '-';
   
-   if (slope >= -10 && slope <= -2) {
+  // 2.5kHzから6kHzの範囲で基音に対して3分の1以上の振幅を持つかどうかをチェック
+  // 高周波成分がなければ裏声と判断
+  if (!hasStrongHighFreq.value) {
+    return '裏声';
+  }
+  
+  // 高周波成分がある場合はスペクトル傾斜で判断
+  if (slope >= -10 && slope <= -2) {
     return '地声';
   } else if (slope > -13 && slope < -10) {
     return '中間';

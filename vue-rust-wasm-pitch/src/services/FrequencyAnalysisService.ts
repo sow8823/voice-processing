@@ -4,6 +4,7 @@
 export interface HarmonicAnalysisResult {
   spectralSlope: number;   // スペクトル傾斜（dB/oct）（-6～-10: 地声、-10～-13: 中間、-13～-18: 裏声）
   bandPeakRatio: number;   // 特定の周波数帯域（2.8kHz～3.2kHz）の最大成分比率（%）
+  highFreqRatio: number;   // 2.5kHz～6kHzの周波数帯域の最大成分比率（%）
 }
 
 export class FrequencyAnalysisService {
@@ -34,7 +35,8 @@ export class FrequencyAnalysisService {
     if (!baseFrequency || baseFrequency < 50) {
       return {
         spectralSlope: 0,
-        bandPeakRatio: 0
+        bandPeakRatio: 0,
+        highFreqRatio: 0
       };
     }
 
@@ -73,7 +75,8 @@ export class FrequencyAnalysisService {
     if (frequencies.length < 2) {
       return {
         spectralSlope: -10, // デフォルト値として中間的な値を設定
-        bandPeakRatio: 0
+        bandPeakRatio: 0,
+        highFreqRatio: 0
       };
     }
     
@@ -97,7 +100,7 @@ export class FrequencyAnalysisService {
       spectralSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
     }
     
-    // 値を範囲内に制限（-6～-18 dB/oct）
+    // 値を範囲内に制限
     spectralSlope = Math.max(-30, Math.min(-2, spectralSlope));
     
     // 2.8kHz～3.2kHzの周波数帯域の最大振幅を計算
@@ -113,9 +116,23 @@ export class FrequencyAnalysisService {
     
     const bandPeakRatio = (maxAmp / baseAmp) * 100;
     
+    // 2.5kHz～6kHzの周波数帯域の最大振幅を計算
+    const highFreqStartIdx = this.getFrequencyIndex(2500, sampleRate, fftSize);
+    const highFreqEndIdx = this.getFrequencyIndex(6000, sampleRate, fftSize);
+    
+    let highFreqMaxAmp = 0;
+    for (let i = highFreqStartIdx; i <= highFreqEndIdx; i++) {
+      if (i < frequencyData.length && frequencyData[i] > highFreqMaxAmp) {
+        highFreqMaxAmp = frequencyData[i];
+      }
+    }
+    
+    const highFreqRatio = (highFreqMaxAmp / baseAmp) * 100;
+    
     return {
       spectralSlope,
-      bandPeakRatio
+      bandPeakRatio,
+      highFreqRatio
     };
   }
 

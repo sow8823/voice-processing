@@ -1421,7 +1421,8 @@ export class VoiceTypeAnalysisService {
     if (baseAmp === 0) {
       return {
         spectralSlope: 0,
-        bandPeakRatio: 0
+        bandPeakRatio: 0,
+        highFreqRatio: 0
       };
     }
     
@@ -1454,7 +1455,8 @@ export class VoiceTypeAnalysisService {
     if (frequencies.length < 2) {
       return {
         spectralSlope: -10, // デフォルト値として中間的な値を設定
-        bandPeakRatio: 0
+        bandPeakRatio: 0,
+        highFreqRatio: 0
       };
     }
     
@@ -1494,9 +1496,23 @@ export class VoiceTypeAnalysisService {
     
     const bandPeakRatio = (maxAmp / baseAmp) * 100;
     
+    // 2.5kHz～6kHzの周波数帯域の最大振幅を計算
+    const highFreqStartIdx = Math.floor((2500 / sampleRate) * fftSize);
+    const highFreqEndIdx = Math.ceil((6000 / sampleRate) * fftSize);
+    
+    let highFreqMaxAmp = 0;
+    for (let i = highFreqStartIdx; i <= highFreqEndIdx; i++) {
+      if (i >= 0 && i < frequencyData.length && frequencyData[i] > highFreqMaxAmp) {
+        highFreqMaxAmp = frequencyData[i];
+      }
+    }
+    
+    const highFreqRatio = (highFreqMaxAmp / baseAmp) * 100;
+    
     return {
       spectralSlope,
-      bandPeakRatio
+      bandPeakRatio,
+      highFreqRatio
     };
   }
 }
