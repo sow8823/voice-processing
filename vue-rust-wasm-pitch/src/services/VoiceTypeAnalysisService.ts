@@ -318,6 +318,7 @@ export class VoiceTypeAnalysisService {
       spectralSlope: number;
       highFrequencyRatio: number;
       noiseRatio: number;
+      nonIntegerHarmonics: number;
     };
   } {
     // 複数フレームの平均値を計算
@@ -325,6 +326,7 @@ export class VoiceTypeAnalysisService {
     let totalHighFrequencyRatio = 0;
     let totalNoiseRatio = 0;
     let validFrameCount = 0;
+    let totalNonIntegerHarmonics = 0;
     
     // 各フレームを分析
     for (const freqData of frequencyDataArray) {
@@ -345,11 +347,13 @@ export class VoiceTypeAnalysisService {
       const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, pitch.frequency);
       const noiseRatio = this.estimateNoiseRatio(freqData, baseFrequency, sampleRate);
       
+      const nonIntegerHarmonics = this.analyzeNonIntegerHarmonics(freqData, pitch.frequency, sampleRate);
       // 有効なフレームのみ集計
       if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(noiseRatio)) {
         totalSpectralSlope += harmonicResult.spectralSlope;
         totalHighFrequencyRatio += highFrequencyRatio;
         totalNoiseRatio += noiseRatio;
+        totalNonIntegerHarmonics += nonIntegerHarmonics;
         validFrameCount++;
       }
     }
@@ -360,12 +364,14 @@ export class VoiceTypeAnalysisService {
       totalSpectralSlope = -10; // 中間的な値
       totalHighFrequencyRatio = 0.2;
       totalNoiseRatio = 0.5;
+      totalNonIntegerHarmonics = 0.3;
     }
     
     // 平均値を計算
     const avgSpectralSlope = totalSpectralSlope / validFrameCount;
     const avgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
     const avgNoiseRatio = totalNoiseRatio / validFrameCount;
+    const avgNonIntegerHarmonics = totalNonIntegerHarmonics / validFrameCount;
     
     // スペクトル傾斜による判定
     const isChestBySlope = avgSpectralSlope >= -10 && avgSpectralSlope <= -2;
@@ -393,7 +399,8 @@ export class VoiceTypeAnalysisService {
       parameters: {
         spectralSlope: avgSpectralSlope,
         highFrequencyRatio: avgHighFrequencyRatio,
-        noiseRatio: avgNoiseRatio
+        noiseRatio: avgNoiseRatio,
+        nonIntegerHarmonics: avgNonIntegerHarmonics
       }
     };
   }
@@ -536,6 +543,7 @@ export class VoiceTypeAnalysisService {
       highFrequencyRatio: number;
       noiseRatio: number;
       strength3kHz?: number;
+      nonIntegerHarmonics?: number;
     };
   } {
     // 複数フレームの平均値を計算
@@ -544,6 +552,7 @@ export class VoiceTypeAnalysisService {
     let totalNoiseRatio = 0;
     let totalStrength3kHz = 0;
     let validFrameCount = 0;
+    let totalNonIntegerHarmonics = 0;
     
     // 各フレームを分析
     for (const freqData of frequencyDataArray) {
@@ -563,6 +572,7 @@ export class VoiceTypeAnalysisService {
       
       const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, pitch.frequency);
       const noiseRatio = this.estimateNoiseRatio(freqData, baseFrequency, sampleRate);
+      const nonIntegerHarmonics = this.analyzeNonIntegerHarmonics(freqData, pitch.frequency, sampleRate);
       
       // 3kHz周辺の強度を分析
       const strength3kHz = this.analyzeFrequencyBandStrength(freqData, 2800, 3200, sampleRate);
@@ -574,6 +584,7 @@ export class VoiceTypeAnalysisService {
         totalNoiseRatio += noiseRatio;
         totalStrength3kHz += strength3kHz;
         validFrameCount++;
+        totalNonIntegerHarmonics += nonIntegerHarmonics;
       }
     }
     
@@ -584,6 +595,7 @@ export class VoiceTypeAnalysisService {
       totalHighFrequencyRatio = 0.2;
       totalNoiseRatio = 0.5;
       totalStrength3kHz = 0.3;
+      totalNonIntegerHarmonics = 0.3;
     }
     
     // 平均値を計算
@@ -591,7 +603,8 @@ export class VoiceTypeAnalysisService {
     const avgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
     const avgNoiseRatio = totalNoiseRatio / validFrameCount;
     const avgStrength3kHz = totalStrength3kHz / validFrameCount;
-    
+    const avgNonIntegerHarmonics = totalNonIntegerHarmonics / validFrameCount;
+
     // スペクトル傾斜による判定
     const isChestBySlope = avgSpectralSlope >= -10 && avgSpectralSlope <= -2;
     const isMiddleBySlope = avgSpectralSlope < -10 && avgSpectralSlope >= -13;
@@ -619,7 +632,8 @@ export class VoiceTypeAnalysisService {
         spectralSlope: avgSpectralSlope,
         highFrequencyRatio: avgHighFrequencyRatio,
         noiseRatio: avgNoiseRatio,
-        strength3kHz: avgStrength3kHz
+        strength3kHz: avgStrength3kHz,
+        nonIntegerHarmonics: avgNonIntegerHarmonics
       }
     };
   }
@@ -738,7 +752,7 @@ export class VoiceTypeAnalysisService {
       parameters: {
         spectralSlope: highPitchAnalysis.parameters.spectralSlope,
         highFrequencyRatio: highPitchAnalysis.parameters.highFrequencyRatio,
-        noiseRatio: highPitchAnalysis.parameters.noiseRatio
+        noiseRatio: highPitchAnalysis.parameters.noiseRatio,
       },
       voiceRegister: highPitchAnalysis.voiceRegister
     };
