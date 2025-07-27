@@ -165,43 +165,6 @@
             </v-card>
           </v-col>
           
-          <!-- 音程別ボイスタイプ表示 -->
-          <v-col cols="12" md="6" v-if="selectedPitchTab !== 'overall' && selectedPitchResult">
-            <v-card variant="outlined" class="pa-4">
-              <v-card-title class="text-subtitle-1">
-                <v-icon start>mdi-music-note</v-icon>
-                {{ getPitchName(selectedPitchTab) }} の分析結果
-              </v-card-title>
-              
-              <div class="text-center my-4">
-                <v-chip
-                  size="large"
-                  :color="getVoiceTypeColor(selectedPitchResult.voiceType)"
-                  class="pa-3"
-                >
-                  <v-icon start>{{ getVoiceTypeIcon(selectedPitchResult.voiceType) }}</v-icon>
-                  <span class="text-subtitle-1">{{ getVoiceTypeName(selectedPitchResult.voiceType) }}</span>
-                </v-chip>
-                
-                <div class="mt-2 text-body-2">
-                  確信度: {{ Math.round(selectedPitchResult.confidence * 100) }}%
-                </div>
-              </div>
-              
-              <v-divider class="my-3"></v-divider>
-              
-              <div v-if="selectedPitchResult.voiceRegister" class="text-center my-3">
-                <v-chip
-                  size="small"
-                  :color="getVoiceRegisterColor(selectedPitchResult.voiceRegister)"
-                  class="pa-2"
-                >
-                  {{ getVoiceRegisterName(selectedPitchResult.voiceRegister) }}
-                </v-chip>
-              </div>
-            </v-card>
-          </v-col>
-          
           <!-- 判定基準の説明（総合結果タブでのみ表示） -->
           <v-col cols="12" md="12" v-if="selectedPitchTab === 'overall'">
             <v-card variant="outlined" class="pa-4">
