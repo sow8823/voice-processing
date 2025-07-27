@@ -358,8 +358,16 @@ export class VoiceTypeAnalysisService {
       // 非整数次倍音を分析
       
       const nonIntegerHarmonics = this.analyzeNonIntegerHarmonics(freqData, pitch.frequency, sampleRate);
-      // 有効なフレームのみ集計
-      if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(nonIntegerHarmonics)) {
+      // 基音の振幅を計算
+      const fftSize = freqData.length * 2;
+      const baseIdx = Math.round((pitch.frequency / sampleRate) * fftSize);
+      const baseAmplitude = baseIdx < freqData.length ? freqData[baseIdx] : 0;
+      
+      // 有効なフレームのみ集計（無音部分も除外）
+      if (!isNaN(harmonicResult.spectralSlope) &&
+          !isNaN(highFrequencyRatio) &&
+          !isNaN(nonIntegerHarmonics) &&
+          baseAmplitude >= 4) { // 振幅が4以上あるかチェック
         totalSpectralSlope += harmonicResult.spectralSlope;
         totalHighFrequencyRatio += highFrequencyRatio;
         totalNonIntegerHarmonics += nonIntegerHarmonics;
@@ -464,8 +472,16 @@ export class VoiceTypeAnalysisService {
       const strength4kHz = this.analyzeFrequencyBandStrength(freqData, 3800, 4200, sampleRate);
       const nonIntegerHarmonics = this.analyzeNonIntegerHarmonics(freqData, pitch.frequency, sampleRate);
       
-      // 有効なフレームのみ集計
-      if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(nonIntegerHarmonics)) {
+      // 基音の振幅を計算
+      const fftSize = freqData.length * 2;
+      const baseIdx = Math.round((pitch.frequency / sampleRate) * fftSize);
+      const baseAmplitude = baseIdx < freqData.length ? freqData[baseIdx] : 0;
+      
+      // 有効なフレームのみ集計（無音部分も除外）
+      if (!isNaN(harmonicResult.spectralSlope) &&
+          !isNaN(highFrequencyRatio) &&
+          !isNaN(nonIntegerHarmonics) &&
+          baseAmplitude >= 4) { // 振幅が4以上あるかチェック
         totalSpectralSlope += harmonicResult.spectralSlope;
         totalHighFrequencyRatio += highFrequencyRatio;
         totalStrength3kHz += strength3kHz;
@@ -575,8 +591,16 @@ export class VoiceTypeAnalysisService {
       // 3kHz周辺の強度を分析
       const strength3kHz = this.analyzeFrequencyBandStrength(freqData, 2800, 3200, sampleRate);
       
-      // 有効なフレームのみ集計
-      if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(nonIntegerHarmonics)) {
+      // 基音の振幅を計算
+      const fftSize = freqData.length * 2;
+      const baseIdx = Math.round((pitch.frequency / sampleRate) * fftSize);
+      const baseAmplitude = baseIdx < freqData.length ? freqData[baseIdx] : 0;
+      
+      // 有効なフレームのみ集計（無音部分も除外）
+      if (!isNaN(harmonicResult.spectralSlope) &&
+          !isNaN(highFrequencyRatio) &&
+          !isNaN(nonIntegerHarmonics) &&
+          baseAmplitude >= 4) { // 振幅が4以上あるかチェック
         totalSpectralSlope += harmonicResult.spectralSlope;
         totalHighFrequencyRatio += highFrequencyRatio;
         totalStrength3kHz += strength3kHz;
