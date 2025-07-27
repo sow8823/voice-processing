@@ -43,8 +43,8 @@
             </v-card>
           </v-col>
           
-          <!-- パラメータ表示 -->
-          <v-col cols="12" md="6">
+          <!-- パラメータ表示（音程別タブでのみ表示） -->
+          <v-col cols="12" md="12" v-if="selectedPitchTab !== 'overall'">
             <v-card variant="outlined" class="pa-4">
               <v-card-title class="text-subtitle-1">
                 <v-icon start>mdi-chart-bar</v-icon>
@@ -58,11 +58,11 @@
                   </template>
                   <v-list-item-title>スペクトル傾斜</v-list-item-title>
                   <v-list-item-subtitle>
-                    {{ Math.round(selectedPitchTab.value === 'overall' ?
+                    {{ Math.round(selectedPitchTab === 'overall' ?
                       analysisResult.parameters.spectralSlope :
                       selectedPitchResult?.parameters.spectralSlope || 0) }} dB/oct
                     <v-progress-linear
-                      :model-value="Math.min(100, Math.abs(((selectedPitchTab.value === 'overall' ?
+                      :model-value="Math.min(100, Math.abs(((selectedPitchTab === 'overall' ?
                         analysisResult.parameters.spectralSlope :
                         selectedPitchResult?.parameters.spectralSlope || 0) + 18) / 12 * 100))"
                       color="primary"
@@ -78,11 +78,11 @@
                   </template>
                   <v-list-item-title>ノイズ成分の割合</v-list-item-title>
                   <v-list-item-subtitle>
-                    {{ Math.round((selectedPitchTab.value === 'overall' ?
+                    {{ Math.round((selectedPitchTab === 'overall' ?
                       analysisResult.parameters.noiseRatio :
                       selectedPitchResult?.parameters.noiseRatio || 0) * 100) }}%
                     <v-progress-linear
-                      :model-value="(selectedPitchTab.value === 'overall' ?
+                      :model-value="(selectedPitchTab === 'overall' ?
                         analysisResult.parameters.noiseRatio :
                         selectedPitchResult?.parameters.noiseRatio || 0) * 100"
                       color="primary"
@@ -99,11 +99,11 @@
                   </template>
                   <v-list-item-title>高周波成分の比率</v-list-item-title>
                   <v-list-item-subtitle>
-                    {{ Math.round((selectedPitchTab.value === 'overall' ?
+                    {{ Math.round((selectedPitchTab === 'overall' ?
                       analysisResult.parameters.highFrequencyRatio :
                       selectedPitchResult?.parameters.highFrequencyRatio || 0) * 100) }}%
                     <v-progress-linear
-                      :model-value="(selectedPitchTab.value === 'overall' ?
+                      :model-value="(selectedPitchTab === 'overall' ?
                         analysisResult.parameters.highFrequencyRatio :
                         selectedPitchResult?.parameters.highFrequencyRatio || 0) * 100"
                       color="primary"
@@ -114,7 +114,7 @@
                 </v-list-item>
 
                 <!-- 新しいパラメータ（存在する場合のみ表示） -->
-                <v-list-item v-if="selectedPitchTab.value === 'overall' && analysisResult.parameters.voiceQualityChange !== undefined">
+                <v-list-item v-if="selectedPitchTab === 'overall' && analysisResult.parameters.voiceQualityChange !== undefined">
                   <template v-slot:prepend>
                     <v-icon>mdi-swap-vertical</v-icon>
                   </template>
@@ -130,7 +130,7 @@
                   </v-list-item-subtitle>
                 </v-list-item>
 
-                <v-list-item v-if="selectedPitchTab.value === 'overall' && analysisResult.parameters.pitchAccuracy !== undefined">
+                <v-list-item v-if="selectedPitchTab === 'overall' && analysisResult.parameters.pitchAccuracy !== undefined">
                   <template v-slot:prepend>
                     <v-icon>mdi-music-accidental-sharp</v-icon>
                   </template>
@@ -146,7 +146,7 @@
                   </v-list-item-subtitle>
                 </v-list-item>
 
-                <v-list-item v-if="selectedPitchTab.value === 'overall' && analysisResult.parameters.brightness3kHz !== undefined">
+                <v-list-item v-if="selectedPitchTab === 'overall' && analysisResult.parameters.brightness3kHz !== undefined">
                   <template v-slot:prepend>
                     <v-icon>mdi-brightness-6</v-icon>
                   </template>
@@ -166,11 +166,11 @@
           </v-col>
           
           <!-- 音程別ボイスタイプ表示 -->
-          <v-col cols="12" md="6" v-if="selectedPitchTab.value !== 'overall' && selectedPitchResult">
+          <v-col cols="12" md="6" v-if="selectedPitchTab !== 'overall' && selectedPitchResult">
             <v-card variant="outlined" class="pa-4">
               <v-card-title class="text-subtitle-1">
                 <v-icon start>mdi-music-note</v-icon>
-                {{ getPitchName(selectedPitchTab.value) }} の分析結果
+                {{ getPitchName(selectedPitchTab) }} の分析結果
               </v-card-title>
               
               <div class="text-center my-4">
@@ -202,8 +202,8 @@
             </v-card>
           </v-col>
           
-          <!-- 判定基準の説明 -->
-          <v-col cols="12" md="6">
+          <!-- 判定基準の説明（総合結果タブでのみ表示） -->
+          <v-col cols="12" md="12" v-if="selectedPitchTab === 'overall'">
             <v-card variant="outlined" class="pa-4">
               <v-card-title class="text-subtitle-1">
                 <v-icon start>mdi-information-outline</v-icon>
@@ -289,7 +289,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import type { VoiceTypeAnalysisResult, VoiceType } from "../../services/VoiceTypeAnalysisService";
 
 // プロパティ
@@ -302,8 +302,15 @@ const props = defineProps<{
 const selectedNote = computed(() => props.selectedNote || 'A4');
 
 // リアクティブな状態
-const voiceTypeInfoTab = ref<string>("lightChest");
 const selectedPitchTab = ref<string>("overall");
+const voiceTypeInfoTab = ref<string>("lightChest");
+
+// 分析結果が変更されたときにボイスタイプのタブを更新
+watch(() => props.analysisResult, (newResult) => {
+  if (newResult) {
+    voiceTypeInfoTab.value = newResult.voiceType;
+  }
+}, { immediate: true });
 
 // 音程IDから表示名を取得する関数
 const getPitchName = (pitchId: string): string => {
@@ -315,11 +322,15 @@ const getPitchName = (pitchId: string): string => {
     'e5': 'E5 (高音)'
   };
   
+  // pitchIdがundefinedの場合のエラー処理を追加
+  if (!pitchId) return '不明な音程';
+  
   return pitchNames[pitchId] || pitchId.toUpperCase();
 };
 
 // 選択された音程の分析結果を取得する計算プロパティ
 const selectedPitchResult = computed(() => {
+  // 計算プロパティ内では.valueを使う必要がある
   if (!props.analysisResult || !props.analysisResult.pitchResults || selectedPitchTab.value === 'overall') {
     return null;
   }
