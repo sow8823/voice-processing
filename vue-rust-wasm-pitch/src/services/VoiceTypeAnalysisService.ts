@@ -295,6 +295,329 @@ export class VoiceTypeAnalysisService {
   }
 
   /**
+   * 低音の分析を行う関数
+   * @param frequencyDataArray 周波数データの配列
+   * @param pitch 音程情報
+   * @param sampleRate サンプリングレート
+   * @returns 分析結果
+   */
+  analyzeLowPitch(
+    frequencyDataArray: Uint8Array[],
+    pitch: PitchSet,
+    sampleRate: number
+  ): {
+    voiceRegister: VoiceRegister;
+    parameters: {
+      spectralSlope: number;
+      highFrequencyRatio: number;
+      noiseRatio: number;
+    };
+  } {
+    // 複数フレームの平均値を計算
+    let totalSpectralSlope = 0;
+    let totalHighFrequencyRatio = 0;
+    let totalNoiseRatio = 0;
+    let validFrameCount = 0;
+    
+    // 各フレームを分析
+    for (const freqData of frequencyDataArray) {
+      // 基本パラメータの計算
+      const baseFrequency = this.findStrongestFrequencyComponent(
+        freqData,
+        pitch.frequency,
+        sampleRate,
+        0.05
+      );
+      
+      const harmonicResult = this.analyzeHarmonicComponents(
+        freqData,
+        baseFrequency,
+        sampleRate
+      );
+      
+      const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, pitch.frequency);
+      const noiseRatio = this.estimateNoiseRatio(freqData, baseFrequency, sampleRate);
+      
+      // 有効なフレームのみ集計
+      if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(noiseRatio)) {
+        totalSpectralSlope += harmonicResult.spectralSlope;
+        totalHighFrequencyRatio += highFrequencyRatio;
+        totalNoiseRatio += noiseRatio;
+        validFrameCount++;
+      }
+    }
+    
+    // 有効なフレームがない場合はデフォルト値を設定
+    if (validFrameCount === 0) {
+      validFrameCount = 1; // ゼロ除算を防ぐ
+      totalSpectralSlope = -10; // 中間的な値
+      totalHighFrequencyRatio = 0.2;
+      totalNoiseRatio = 0.5;
+    }
+    
+    // 平均値を計算
+    const avgSpectralSlope = totalSpectralSlope / validFrameCount;
+    const avgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
+    const avgNoiseRatio = totalNoiseRatio / validFrameCount;
+    
+    // スペクトル傾斜による判定
+    const isChestBySlope = avgSpectralSlope >= -10 && avgSpectralSlope <= -2;
+    const isMiddleBySlope = avgSpectralSlope < -10 && avgSpectralSlope >= -13;
+    const isFalsettoBySlope = avgSpectralSlope < -13;
+    
+    // 高周波成分の強度による判定
+    const hasStrongHighFreq = avgHighFrequencyRatio >= 0.25;
+    
+    // 総合判定
+    let voiceRegister: VoiceRegister = 'middle';
+    if (isChestBySlope && hasStrongHighFreq) {
+      // 両方の条件で地声傾向
+      voiceRegister = 'chest';
+    } else if (!hasStrongHighFreq) {
+      // 高周波成分の強度で裏声傾向
+      voiceRegister = 'falsetto';
+    } else {
+      // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
+      voiceRegister = 'middle';
+    }
+    
+    return {
+      voiceRegister,
+      parameters: {
+        spectralSlope: avgSpectralSlope,
+        highFrequencyRatio: avgHighFrequencyRatio,
+        noiseRatio: avgNoiseRatio
+      }
+    };
+  }
+
+  /**
+   * 中音の分析を行う関数
+   * @param frequencyDataArray 周波数データの配列
+   * @param pitch 音程情報
+   * @param sampleRate サンプリングレート
+   * @returns 分析結果
+   */
+  analyzeMidPitch(
+    frequencyDataArray: Uint8Array[],
+    pitch: PitchSet,
+    sampleRate: number
+  ): {
+    voiceRegister: VoiceRegister;
+    parameters: {
+      spectralSlope: number;
+      highFrequencyRatio: number;
+      noiseRatio: number;
+      strength3kHz: number;
+      strength4kHz: number;
+      nonIntegerHarmonics: number;
+    };
+  } {
+    // 複数フレームの平均値を計算
+    let totalSpectralSlope = 0;
+    let totalHighFrequencyRatio = 0;
+    let totalNoiseRatio = 0;
+    let totalStrength3kHz = 0;
+    let totalStrength4kHz = 0;
+    let totalNonIntegerHarmonics = 0;
+    let validFrameCount = 0;
+    
+    // 各フレームを分析
+    for (const freqData of frequencyDataArray) {
+      // 基本パラメータの計算
+      const baseFrequency = this.findStrongestFrequencyComponent(
+        freqData,
+        pitch.frequency,
+        sampleRate,
+        0.05
+      );
+      
+      const harmonicResult = this.analyzeHarmonicComponents(
+        freqData,
+        baseFrequency,
+        sampleRate
+      );
+      
+      const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, pitch.frequency);
+      const noiseRatio = this.estimateNoiseRatio(freqData, baseFrequency, sampleRate);
+      
+      // 3kHzと4kHz周辺の強度を分析
+      const strength3kHz = this.analyzeFrequencyBandStrength(freqData, 2800, 3200, sampleRate);
+      const strength4kHz = this.analyzeFrequencyBandStrength(freqData, 3800, 4200, sampleRate);
+      const nonIntegerHarmonics = this.analyzeNonIntegerHarmonics(freqData, pitch.frequency, sampleRate);
+      
+      // 有効なフレームのみ集計
+      if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(noiseRatio)) {
+        totalSpectralSlope += harmonicResult.spectralSlope;
+        totalHighFrequencyRatio += highFrequencyRatio;
+        totalNoiseRatio += noiseRatio;
+        totalStrength3kHz += strength3kHz;
+        totalStrength4kHz += strength4kHz;
+        totalNonIntegerHarmonics += nonIntegerHarmonics;
+        validFrameCount++;
+      }
+    }
+    
+    // 有効なフレームがない場合はデフォルト値を設定
+    if (validFrameCount === 0) {
+      validFrameCount = 1; // ゼロ除算を防ぐ
+      totalSpectralSlope = -10; // 中間的な値
+      totalHighFrequencyRatio = 0.2;
+      totalNoiseRatio = 0.5;
+      totalStrength3kHz = 0.3;
+      totalStrength4kHz = 0.3;
+      totalNonIntegerHarmonics = 0.3;
+    }
+    
+    // 平均値を計算
+    const avgSpectralSlope = totalSpectralSlope / validFrameCount;
+    const avgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
+    const avgNoiseRatio = totalNoiseRatio / validFrameCount;
+    const avgStrength3kHz = totalStrength3kHz / validFrameCount;
+    const avgStrength4kHz = totalStrength4kHz / validFrameCount;
+    const avgNonIntegerHarmonics = totalNonIntegerHarmonics / validFrameCount;
+    
+    // スペクトル傾斜による判定
+    const isChestBySlope = avgSpectralSlope >= -10 && avgSpectralSlope <= -2;
+    const isMiddleBySlope = avgSpectralSlope < -10 && avgSpectralSlope >= -13;
+    const isFalsettoBySlope = avgSpectralSlope < -13;
+    
+    // 高周波成分の強度による判定
+    const hasStrongHighFreq = avgHighFrequencyRatio >= 0.25;
+    
+    // 総合判定
+    let voiceRegister: VoiceRegister = 'middle';
+    if (isChestBySlope && hasStrongHighFreq) {
+      // 両方の条件で地声傾向
+      voiceRegister = 'chest';
+    } else if (!hasStrongHighFreq) {
+      // 高周波成分の強度で裏声傾向
+      voiceRegister = 'falsetto';
+    } else {
+      // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
+      voiceRegister = 'middle';
+    }
+    
+    return {
+      voiceRegister,
+      parameters: {
+        spectralSlope: avgSpectralSlope,
+        highFrequencyRatio: avgHighFrequencyRatio,
+        noiseRatio: avgNoiseRatio,
+        strength3kHz: avgStrength3kHz,
+        strength4kHz: avgStrength4kHz,
+        nonIntegerHarmonics: avgNonIntegerHarmonics
+      }
+    };
+  }
+
+  /**
+   * 高音の分析を行う関数
+   * @param frequencyDataArray 周波数データの配列
+   * @param pitch 音程情報
+   * @param sampleRate サンプリングレート
+   * @returns 分析結果
+   */
+  analyzeHighPitch(
+    frequencyDataArray: Uint8Array[],
+    pitch: PitchSet,
+    sampleRate: number
+  ): {
+    voiceRegister: VoiceRegister;
+    parameters: {
+      spectralSlope: number;
+      highFrequencyRatio: number;
+      noiseRatio: number;
+      strength3kHz?: number;
+    };
+  } {
+    // 複数フレームの平均値を計算
+    let totalSpectralSlope = 0;
+    let totalHighFrequencyRatio = 0;
+    let totalNoiseRatio = 0;
+    let totalStrength3kHz = 0;
+    let validFrameCount = 0;
+    
+    // 各フレームを分析
+    for (const freqData of frequencyDataArray) {
+      // 基本パラメータの計算
+      const baseFrequency = this.findStrongestFrequencyComponent(
+        freqData,
+        pitch.frequency,
+        sampleRate,
+        0.05
+      );
+      
+      const harmonicResult = this.analyzeHarmonicComponents(
+        freqData,
+        baseFrequency,
+        sampleRate
+      );
+      
+      const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, pitch.frequency);
+      const noiseRatio = this.estimateNoiseRatio(freqData, baseFrequency, sampleRate);
+      
+      // 3kHz周辺の強度を分析
+      const strength3kHz = this.analyzeFrequencyBandStrength(freqData, 2800, 3200, sampleRate);
+      
+      // 有効なフレームのみ集計
+      if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(noiseRatio)) {
+        totalSpectralSlope += harmonicResult.spectralSlope;
+        totalHighFrequencyRatio += highFrequencyRatio;
+        totalNoiseRatio += noiseRatio;
+        totalStrength3kHz += strength3kHz;
+        validFrameCount++;
+      }
+    }
+    
+    // 有効なフレームがない場合はデフォルト値を設定
+    if (validFrameCount === 0) {
+      validFrameCount = 1; // ゼロ除算を防ぐ
+      totalSpectralSlope = -10; // 中間的な値
+      totalHighFrequencyRatio = 0.2;
+      totalNoiseRatio = 0.5;
+      totalStrength3kHz = 0.3;
+    }
+    
+    // 平均値を計算
+    const avgSpectralSlope = totalSpectralSlope / validFrameCount;
+    const avgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
+    const avgNoiseRatio = totalNoiseRatio / validFrameCount;
+    const avgStrength3kHz = totalStrength3kHz / validFrameCount;
+    
+    // スペクトル傾斜による判定
+    const isChestBySlope = avgSpectralSlope >= -10 && avgSpectralSlope <= -2;
+    const isMiddleBySlope = avgSpectralSlope < -10 && avgSpectralSlope >= -13;
+    const isFalsettoBySlope = avgSpectralSlope < -13;
+    
+    // 高周波成分の強度による判定
+    const hasStrongHighFreq = avgHighFrequencyRatio >= 0.25;
+    
+    // 総合判定
+    let voiceRegister: VoiceRegister = 'middle';
+    if (isChestBySlope && hasStrongHighFreq) {
+      // 両方の条件で地声傾向
+      voiceRegister = 'chest';
+    } else if (!hasStrongHighFreq) {
+      // 高周波成分の強度で裏声傾向
+      voiceRegister = 'falsetto';
+    } else {
+      // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
+      voiceRegister = 'middle';
+    }
+    
+    return {
+      voiceRegister,
+      parameters: {
+        spectralSlope: avgSpectralSlope,
+        highFrequencyRatio: avgHighFrequencyRatio,
+        noiseRatio: avgNoiseRatio,
+        strength3kHz: avgStrength3kHz
+      }
+    };
+  }
+
+  /**
    * 複数の音程の音声を分析してボイスタイプを段階的に判定する
    * @param frequencyDataArrays 各音程の周波数データ配列のマップ
    * @param pitchDataArrays 各音程のピッチデータ配列のマップ
@@ -313,6 +636,7 @@ export class VoiceTypeAnalysisService {
     // 結果変数
     let finalVoiceType: VoiceType = 'unknown';
     let confidence = 0.5;
+    
     // 使用する音程セット
     const pitchSet = this.genderPitchSets[gender];
     const lowPitch = pitchSet[0];  // 最低音
@@ -324,14 +648,18 @@ export class VoiceTypeAnalysisService {
     const midPitchFreqDataArray = frequencyDataArrays[midPitch.id];
     const highPitchFreqDataArray = frequencyDataArrays[highPitch.id];
     
-    // データが不足している場合はデフォルト値を使用
-    const useDefaultData = !lowPitchFreqDataArray || !midPitchFreqDataArray || !highPitchFreqDataArray ||
-        lowPitchFreqDataArray.length === 0 || midPitchFreqDataArray.length === 0 || highPitchFreqDataArray.length === 0;
-    
-    if (useDefaultData) {
-      // 最終的な分類では不明として処理するためのフラグを設定
-      finalVoiceType = 'unknown';
-      confidence = 0;
+    // データが不足している場合は不明として処理
+    if (!lowPitchFreqDataArray || !midPitchFreqDataArray || !highPitchFreqDataArray ||
+        lowPitchFreqDataArray.length === 0 || midPitchFreqDataArray.length === 0 || highPitchFreqDataArray.length === 0) {
+      return {
+        voiceType: 'unknown',
+        confidence: 0,
+        parameters: {
+          spectralSlope: 0,
+          highFrequencyRatio: 0,
+          noiseRatio: 0
+        }
+      };
     }
     
     // 各音程の分析結果を格納するオブジェクト
@@ -346,498 +674,66 @@ export class VoiceTypeAnalysisService {
       voiceRegister: VoiceRegister;
     }> = {};
     
-    // 第1音程の分析（最低音）- 複数フレームの平均値を計算
-    let totalSpectralSlope = 0;
-    let totalHighFrequencyRatio = 0;
-    let totalNoiseRatio = 0;
-    let validFrameCount = 0;
-    let dominantVoiceRegister: VoiceRegister = 'middle';
-    
-    // 各フレームを分析
-    for (const lowPitchFreqData of lowPitchFreqDataArray) {
-      // 基本パラメータの計算
-      const baseFrequency = this.findStrongestFrequencyComponent(
-        lowPitchFreqData,
-        lowPitch.frequency,
-        sampleRate,
-        0.05
-      );
-      
-      // 不要なパラメータを削除
-      
-      const harmonicResult = this.analyzeHarmonicComponents(
-        lowPitchFreqData,
-        baseFrequency,
-        sampleRate
-      );
-      
-      const highFrequencyRatio = this.calculateHighFrequencyRatio(lowPitchFreqData, sampleRate, lowPitch.frequency);
-      const noiseRatio = this.estimateNoiseRatio(lowPitchFreqData, baseFrequency, sampleRate);
-      
-      // 有効なフレームのみ集計
-      if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(noiseRatio)) {
-        totalSpectralSlope += harmonicResult.spectralSlope;
-        totalHighFrequencyRatio += highFrequencyRatio;
-        totalNoiseRatio += noiseRatio;
-        validFrameCount++;
-      }
-    }
-    
-    // 有効なフレームがない場合はデフォルト値を設定
-    if (validFrameCount === 0) {
-      // デフォルト値を設定して処理を続行
-      validFrameCount = 1; // ゼロ除算を防ぐ
-      totalSpectralSlope = -10; // 中間的な値
-      totalHighFrequencyRatio = 0.2;
-      totalNoiseRatio = 0.5;
-    }
-    
-    // 平均値を計算
-    const lowAvgSpectralSlope = totalSpectralSlope / validFrameCount;
-    const lowAvgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
-    const lowAvgNoiseRatio = totalNoiseRatio / validFrameCount;
-    
-    // ファイル全体を通した音声特徴量の平均値をもとに声区を判定
-    // スペクトル傾斜による判定
-    const lowIsChestBySlope = lowAvgSpectralSlope >= -10 && lowAvgSpectralSlope <= -2;
-    const lowIsMiddleBySlope = lowAvgSpectralSlope < -10 && lowAvgSpectralSlope >= -13;
-    const lowIsFalsettoBySlope = lowAvgSpectralSlope < -13;
-    
-    // 高周波成分の強度による判定
-    // 2.0kHz以上の高周波成分の中で、基音に対して4分の1以上の強さを持つ成分があるか
-    const lowHasStrongHighFreq = lowAvgHighFrequencyRatio >= 0.25;
-    
-    // 総合判定
-    if (lowIsChestBySlope && lowHasStrongHighFreq) {
-      // 両方の条件で地声傾向
-      dominantVoiceRegister = 'chest';
-    } else if (!lowHasStrongHighFreq) {
-      // 高周波成分の強度で裏声傾向
-      dominantVoiceRegister = 'falsetto';
-    } else {
-      // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
-      dominantVoiceRegister = 'middle';
-    }
+    // 低音の分析
+    const lowPitchAnalysis = this.analyzeLowPitch(
+      lowPitchFreqDataArray,
+      lowPitch,
+      sampleRate
+    );
     
     // 結果を保存
     pitchResults[lowPitch.id] = {
       voiceType: 'unknown', // 仮の値
       confidence: 0.8,
       parameters: {
-        spectralSlope: lowAvgSpectralSlope,
-        highFrequencyRatio: lowAvgHighFrequencyRatio,
-        noiseRatio: lowAvgNoiseRatio
+        spectralSlope: lowPitchAnalysis.parameters.spectralSlope,
+        highFrequencyRatio: lowPitchAnalysis.parameters.highFrequencyRatio,
+        noiseRatio: lowPitchAnalysis.parameters.noiseRatio
       },
-      voiceRegister: dominantVoiceRegister
+      voiceRegister: lowPitchAnalysis.voiceRegister
     };
     
-    // 第1音程の分析結果を保存（早期リターンを削除）
-    // 全ての音程の分析が完了した後に最終的な分類を行うため、ここではリターンしない
-    
-    // 地声の判定が出た場合 → 第2音程の分析へ進む
-    
-    // 中間音の分析 - 複数フレームの平均値を計算
-    totalSpectralSlope = 0;
-    totalHighFrequencyRatio = 0;
-    totalNoiseRatio = 0;
-    validFrameCount = 0;
-    let totalStrength3kHz = 0;
-    let totalStrength4kHz = 0;
-    let totalNonIntegerHarmonics = 0;
-    
-    // 各フレームを分析
-    for (const midPitchFreqData of midPitchFreqDataArray) {
-      // 基本パラメータの計算
-      const baseFrequency = this.findStrongestFrequencyComponent(
-        midPitchFreqData,
-        midPitch.frequency,
-        sampleRate,
-        0.05
-      );
-      
-      // 不要なパラメータを削除
-      
-      const harmonicResult = this.analyzeHarmonicComponents(
-        midPitchFreqData,
-        baseFrequency,
-        sampleRate
-      );
-      
-      const highFrequencyRatio = this.calculateHighFrequencyRatio(midPitchFreqData, sampleRate, midPitch.frequency);
-      const noiseRatio = this.estimateNoiseRatio(midPitchFreqData, baseFrequency, sampleRate);
-      
-      // 3kHzと4kHz周辺の強度を分析
-      const strength3kHz = this.analyzeFrequencyBandStrength(midPitchFreqData, 2800, 3200, sampleRate);
-      const strength4kHz = this.analyzeFrequencyBandStrength(midPitchFreqData, 3800, 4200, sampleRate);
-      const nonIntegerHarmonics = this.analyzeNonIntegerHarmonics(midPitchFreqData, midPitch.frequency, sampleRate);
-      
-      // 有効なフレームのみ集計
-      if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(noiseRatio)) {
-        totalSpectralSlope += harmonicResult.spectralSlope;
-        totalHighFrequencyRatio += highFrequencyRatio;
-        totalNoiseRatio += noiseRatio;
-        totalStrength3kHz += strength3kHz;
-        totalStrength4kHz += strength4kHz;
-        totalNonIntegerHarmonics += nonIntegerHarmonics;
-        validFrameCount++;
-      }
-    }
-    
-    // 有効なフレームがない場合
-    if (validFrameCount === 0) {
-      return {
-        voiceType: 'unknown',
-        confidence: 0,
-        parameters: {
-          spectralSlope: 0,
-          highFrequencyRatio: 0,
-          noiseRatio: 0
-        }
-      };
-    }
-    
-    // 平均値を計算
-    const midAvgSpectralSlope = totalSpectralSlope / validFrameCount;
-    const midAvgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
-    const midAvgNoiseRatio = totalNoiseRatio / validFrameCount;
-    const avgStrength3kHz = totalStrength3kHz / validFrameCount;
-    const avgStrength4kHz = totalStrength4kHz / validFrameCount;
-    const avgNonIntegerHarmonics = totalNonIntegerHarmonics / validFrameCount;
-    
-    // ファイル全体を通した音声特徴量の平均値をもとに声区を判定
-    // スペクトル傾斜による判定
-    const midIsChestBySlope = midAvgSpectralSlope >= -10 && midAvgSpectralSlope <= -2;
-    const midIsMiddleBySlope = midAvgSpectralSlope < -10 && midAvgSpectralSlope >= -13;
-    const midIsFalsettoBySlope = midAvgSpectralSlope < -13;
-    
-    // 高周波成分の強度による判定
-    // 2.0kHz以上の高周波成分の中で、基音に対して4分の1以上の強さを持つ成分があるか
-    const midHasStrongHighFreq = midAvgHighFrequencyRatio >= 0.25;
-    
-    // 総合判定
-    let midPitchRegister: VoiceRegister = 'middle';
-    if (midIsChestBySlope && midHasStrongHighFreq) {
-      // 両方の条件で地声傾向
-      midPitchRegister = 'chest';
-    } else if (!midHasStrongHighFreq) {
-      // 高周波成分の強度で裏声傾向
-      midPitchRegister = 'falsetto';
-    } else {
-      // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
-      midPitchRegister = 'middle';
-    }
+    // 中音の分析
+    const midPitchAnalysis = this.analyzeMidPitch(
+      midPitchFreqDataArray,
+      midPitch,
+      sampleRate
+    );
     
     // 結果を保存
     pitchResults[midPitch.id] = {
       voiceType: 'unknown', // 仮の値
       confidence: 0.8,
       parameters: {
-        spectralSlope: midAvgSpectralSlope,
-        highFrequencyRatio: midAvgHighFrequencyRatio,
-        noiseRatio: midAvgNoiseRatio
+        spectralSlope: midPitchAnalysis.parameters.spectralSlope,
+        highFrequencyRatio: midPitchAnalysis.parameters.highFrequencyRatio,
+        noiseRatio: midPitchAnalysis.parameters.noiseRatio
       },
-      voiceRegister: midPitchRegister
+      voiceRegister: midPitchAnalysis.voiceRegister
     };
     
-    // 第2音程の判定（更新された基準）
+    // 3kHzと4kHz周辺の強度を取得
+    const avgStrength3kHz = midPitchAnalysis.parameters.strength3kHz || 0;
+    const avgStrength4kHz = midPitchAnalysis.parameters.strength4kHz || 0;
+    const avgNonIntegerHarmonics = midPitchAnalysis.parameters.nonIntegerHarmonics || 0;
     
-    // 4kHz周辺の成分が強く、非整数次倍音が多い場合
-    if (avgStrength4kHz > 0.6 && avgNonIntegerHarmonics > 0.5) {
-      // 高音の分析 - 複数フレームの平均値を計算
-      totalSpectralSlope = 0;
-      totalHighFrequencyRatio = 0;
-      totalNoiseRatio = 0;
-      validFrameCount = 0;
-      
-      // 各フレームを分析
-      for (const highPitchFreqData of highPitchFreqDataArray) {
-        // 基本パラメータの計算
-        const baseFrequency = this.findStrongestFrequencyComponent(
-          highPitchFreqData,
-          highPitch.frequency,
-          sampleRate,
-          0.05
-        );
-        
-        // 不要なパラメータを削除
-        
-        const harmonicResult = this.analyzeHarmonicComponents(
-          highPitchFreqData,
-          baseFrequency,
-          sampleRate
-        );
-        
-        const highFrequencyRatio = this.calculateHighFrequencyRatio(highPitchFreqData, sampleRate, highPitch.frequency);
-        const noiseRatio = this.estimateNoiseRatio(highPitchFreqData, baseFrequency, sampleRate);
-        
-        // 有効なフレームのみ集計
-        if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(noiseRatio)) {
-          totalSpectralSlope += harmonicResult.spectralSlope;
-          totalHighFrequencyRatio += highFrequencyRatio;
-          totalNoiseRatio += noiseRatio;
-          validFrameCount++;
-        }
-      }
-      
-      // 有効なフレームがない場合はデフォルト値を設定
-      if (validFrameCount === 0) {
-        // デフォルト値を設定して処理を続行
-        validFrameCount = 1; // ゼロ除算を防ぐ
-        totalSpectralSlope = -10; // 中間的な値
-        totalHighFrequencyRatio = 0.2;
-        totalNoiseRatio = 0.5;
-      }
-      
-      // 平均値を計算
-      const pullHighAvgSpectralSlope = totalSpectralSlope / validFrameCount;
-      const pullHighAvgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
-      const pullHighAvgNoiseRatio = totalNoiseRatio / validFrameCount;
-      
-      // ファイル全体を通した音声特徴量の平均値をもとに声区を判定
-      // スペクトル傾斜による判定
-      const pullHighIsChestBySlope = pullHighAvgSpectralSlope >= -10 && pullHighAvgSpectralSlope <= -2;
-      const pullHighIsMiddleBySlope = pullHighAvgSpectralSlope < -10 && pullHighAvgSpectralSlope >= -13;
-      const pullHighIsFalsettoBySlope = pullHighAvgSpectralSlope < -13;
-      
-      // 高周波成分の強度による判定
-      // 2.0kHz以上の高周波成分の中で、基音に対して4分の1以上の強さを持つ成分があるか
-      const pullHighHasStrongHighFreq = pullHighAvgHighFrequencyRatio >= 0.25;
-      
-      // 総合判定
-      let pullHighPitchRegister: VoiceRegister = 'middle';
-      if (pullHighIsChestBySlope && pullHighHasStrongHighFreq) {
-        // 両方の条件で地声傾向
-        pullHighPitchRegister = 'chest';
-      } else if (!pullHighHasStrongHighFreq) {
-        // 高周波成分の強度で裏声傾向
-        pullHighPitchRegister = 'falsetto';
-      } else {
-        // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
-        pullHighPitchRegister = 'middle';
-      }
-      
-      // 結果を保存
-      pitchResults[highPitch.id] = {
-        voiceType: 'unknown', // 仮の値
-        confidence: 0.8,
-        parameters: {
-          spectralSlope: pullHighAvgSpectralSlope,
-          highFrequencyRatio: pullHighAvgHighFrequencyRatio,
-          noiseRatio: pullHighAvgNoiseRatio
-        },
-        voiceRegister: pullHighPitchRegister
-      };
-      
-      // 音程間の声質変化を分析
-      const voiceQualityChange = this.analyzeVoiceQualityChange(pitchResults, gender);
-      const voiceConsistency = this.analyzeVoiceConsistency(pitchResults);
-      const brightness3kHz = this.analyzeBrightness3kHz(pitchResults);
-      const pitchAccuracy = this.analyzePitchAccuracy(pitchResults, gender);
-      
-      // パラメータの平均値を計算
-      const avgParameters = this.calculateAverageParameters(pitchResults);
-      
-      return {
-        voiceType: 'pull',
-        confidence: 0.8,
-        parameters: {
-          ...avgParameters,
-          voiceQualityChange,
-          pitchAccuracy,
-          voiceConsistency,
-          brightness3kHz
-        },
-        pitchResults
-      };
-    }
-    
-    // 3kHz周辺の成分が強く、非整数次倍音が少ない場合
-    if (avgStrength3kHz > 0.6 && avgNonIntegerHarmonics < 0.3) {
-      
-      // 音程間の声質変化を分析
-      const voiceQualityChange = this.analyzeVoiceQualityChange(pitchResults, gender);
-      const voiceConsistency = this.analyzeVoiceConsistency(pitchResults);
-      const brightness3kHz = this.analyzeBrightness3kHz(pitchResults);
-      const pitchAccuracy = this.analyzePitchAccuracy(pitchResults, gender);
-      
-      // パラメータの平均値を計算
-      const avgParameters = this.calculateAverageParameters(pitchResults);
-      
-      // 第3音程の判定（更新された基準）
-      
-      // 高音の分析 - 複数フレームの平均値を計算
-      totalSpectralSlope = 0;
-      totalHighFrequencyRatio = 0;
-      totalNoiseRatio = 0;
-      validFrameCount = 0;
-      let totalHighStrength3kHz = 0;
-      
-      // 各フレームを分析
-      for (const highPitchFreqData of highPitchFreqDataArray) {
-        // 基本パラメータの計算
-        const baseFrequency = this.findStrongestFrequencyComponent(
-          highPitchFreqData,
-          highPitch.frequency,
-          sampleRate,
-          0.05
-        );
-        
-        const harmonicResult = this.analyzeHarmonicComponents(
-          highPitchFreqData,
-          baseFrequency,
-          sampleRate
-        );
-        
-        const highFrequencyRatio = this.calculateHighFrequencyRatio(highPitchFreqData, sampleRate, highPitch.frequency);
-        const noiseRatio = this.estimateNoiseRatio(highPitchFreqData, baseFrequency, sampleRate);
-        
-        // 3kHz周辺の強度を分析
-        const highStrength3kHz = this.analyzeFrequencyBandStrength(highPitchFreqData, 2800, 3200, sampleRate);
-        
-        // 有効なフレームのみ集計
-        if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(noiseRatio)) {
-          totalSpectralSlope += harmonicResult.spectralSlope;
-          totalHighFrequencyRatio += highFrequencyRatio;
-          totalNoiseRatio += noiseRatio;
-          totalHighStrength3kHz += highStrength3kHz;
-          validFrameCount++;
-        }
-      }
-      
-      // 有効なフレームがない場合はデフォルト値を設定
-      if (validFrameCount === 0) {
-        // デフォルト値を設定して処理を続行
-        validFrameCount = 1; // ゼロ除算を防ぐ
-        totalSpectralSlope = -10; // 中間的な値
-        totalHighFrequencyRatio = 0.2;
-        totalNoiseRatio = 0.5;
-        totalHighStrength3kHz = 0.3;
-      }
-      
-      // 平均値を計算
-      const highAvgSpectralSlope = totalSpectralSlope / validFrameCount;
-      const highAvgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
-      const highAvgNoiseRatio = totalNoiseRatio / validFrameCount;
-      const avgHighStrength3kHz = totalHighStrength3kHz / validFrameCount;
-      
-      // スペクトル傾斜による判定
-      const highIsChestBySlope = highAvgSpectralSlope >= -10 && highAvgSpectralSlope <= -2;
-      const highIsMiddleBySlope = highAvgSpectralSlope < -10 && highAvgSpectralSlope >= -13;
-      const highIsFalsettoBySlope = highAvgSpectralSlope < -13;
-      
-      // 高周波成分の強度による判定
-      const highHasStrongHighFreq = highAvgHighFrequencyRatio >= 0.25;
-      
-      // 総合判定
-      let highPitchRegister: VoiceRegister = 'middle';
-      if (highIsChestBySlope && highHasStrongHighFreq) {
-        // 両方の条件で地声傾向
-        highPitchRegister = 'chest';
-      } else if (!highHasStrongHighFreq) {
-        // 高周波成分の強度で裏声傾向
-        highPitchRegister = 'falsetto';
-      } else {
-        // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
-        highPitchRegister = 'middle';
-      }
-      
-      // 結果を保存
-      pitchResults[highPitch.id] = {
-        voiceType: 'unknown', // 仮の値
-        confidence: 0.8,
-        parameters: {
-          spectralSlope: highAvgSpectralSlope,
-          highFrequencyRatio: highAvgHighFrequencyRatio,
-          noiseRatio: highAvgNoiseRatio
-        },
-        voiceRegister: highPitchRegister
-      };
-      
-      // フラグ設定を削除（最終分類で直接条件を判定）
-    }
-    
-    // 判定できない場合
-    // 高音の分析 - 複数フレームの平均値を計算（判定できない場合）
-    totalSpectralSlope = 0;
-    totalHighFrequencyRatio = 0;
-    totalNoiseRatio = 0;
-    validFrameCount = 0;
-    
-    // 各フレームを分析
-    for (const highPitchFreqData of highPitchFreqDataArray) {
-      // 基本パラメータの計算
-      const baseFrequency = this.findStrongestFrequencyComponent(
-        highPitchFreqData,
-        highPitch.frequency,
-        sampleRate,
-        0.05
-      );
-      
-      const harmonicResult = this.analyzeHarmonicComponents(
-        highPitchFreqData,
-        baseFrequency,
-        sampleRate
-      );
-      
-      const highFrequencyRatio = this.calculateHighFrequencyRatio(highPitchFreqData, sampleRate, highPitch.frequency);
-      const noiseRatio = this.estimateNoiseRatio(highPitchFreqData, baseFrequency, sampleRate);
-      
-      // 有効なフレームのみ集計
-      if (!isNaN(harmonicResult.spectralSlope) && !isNaN(highFrequencyRatio) && !isNaN(noiseRatio)) {
-        totalSpectralSlope += harmonicResult.spectralSlope;
-        totalHighFrequencyRatio += highFrequencyRatio;
-        totalNoiseRatio += noiseRatio;
-        validFrameCount++;
-      }
-    }
-    
-    // 有効なフレームがない場合はデフォルト値を設定
-    if (validFrameCount === 0) {
-      // デフォルト値を設定して処理を続行
-      validFrameCount = 1; // ゼロ除算を防ぐ
-      totalSpectralSlope = -10; // 中間的な値
-      totalHighFrequencyRatio = 0.2;
-      totalNoiseRatio = 0.5;
-    }
-    
-    // 平均値を計算
-    const unknownHighAvgSpectralSlope = totalSpectralSlope / validFrameCount;
-    const avgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
-    const avgNoiseRatio = totalNoiseRatio / validFrameCount;
-    
-    // ファイル全体を通した音声特徴量の平均値をもとに声区を判定
-    // スペクトル傾斜による判定
-    const unknownHighIsChestBySlope = unknownHighAvgSpectralSlope >= -10 && unknownHighAvgSpectralSlope <= -2;
-    const unknownHighIsMiddleBySlope = unknownHighAvgSpectralSlope < -10 && unknownHighAvgSpectralSlope >= -13;
-    const unknownHighIsFalsettoBySlope = unknownHighAvgSpectralSlope < -13;
-    
-    // 高周波成分の強度による判定
-    // 2.0kHz以上の高周波成分の中で、基音に対して4分の1以上の強さを持つ成分があるか
-    const unknownHighHasStrongHighFreq = avgHighFrequencyRatio >= 0.25;
-    
-    // 総合判定
-    let highPitchRegister: VoiceRegister = 'middle';
-    if (unknownHighIsChestBySlope && unknownHighHasStrongHighFreq) {
-      // 両方の条件で地声傾向
-      highPitchRegister = 'chest';
-    } else if (!unknownHighHasStrongHighFreq) {
-      // 高周波成分の強度で裏声傾向
-      highPitchRegister = 'falsetto';
-    } else {
-      // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
-      highPitchRegister = 'middle';
-    }
+    // 高音の分析
+    const highPitchAnalysis = this.analyzeHighPitch(
+      highPitchFreqDataArray,
+      highPitch,
+      sampleRate
+    );
     
     // 結果を保存
     pitchResults[highPitch.id] = {
       voiceType: 'unknown', // 仮の値
       confidence: 0.8,
       parameters: {
-        spectralSlope: unknownHighAvgSpectralSlope,
-        highFrequencyRatio: avgHighFrequencyRatio,
-        noiseRatio: avgNoiseRatio
+        spectralSlope: highPitchAnalysis.parameters.spectralSlope,
+        highFrequencyRatio: highPitchAnalysis.parameters.highFrequencyRatio,
+        noiseRatio: highPitchAnalysis.parameters.noiseRatio
       },
-      voiceRegister: highPitchRegister
+      voiceRegister: highPitchAnalysis.voiceRegister
     };
     
     // 音程間の声質変化を分析
@@ -852,18 +748,13 @@ export class VoiceTypeAnalysisService {
     // 全ての音程の分析が完了した後に、それらの分析結果から最終的な分類を行う
     
     // 第1音程（低音）の判定
-    const lowPitchResult = pitchResults[lowPitch.id];
-    const lowVoiceRegister = lowPitchResult.voiceRegister;
+    const lowVoiceRegister = lowPitchAnalysis.voiceRegister;
     
     // 第2音程（中音）の判定
-    const midPitchResult = pitchResults[midPitch.id];
-    const midVoiceRegister = midPitchResult.voiceRegister;
+    const midVoiceRegister = midPitchAnalysis.voiceRegister;
     
     // 第3音程（高音）の判定
-    const highPitchResult = pitchResults[highPitch.id];
-    const highVoiceRegister = highPitchResult.voiceRegister;
-    
-    // 分類条件（優先順位順）
+    const highVoiceRegister = highPitchAnalysis.voiceRegister;
     
     // 分類条件（優先順位順）
     // 1. 第1音程が中間または裏声の場合 → ライトチェスト
@@ -872,29 +763,42 @@ export class VoiceTypeAnalysisService {
       confidence = 0.8;
     }
     // 2. 第2音程の4kHz周辺の成分が強く、非整数次倍音が多い場合 → プル
-    else if (avgStrength4kHz > 0.6 && avgNonIntegerHarmonics > 0.5) {
-      finalVoiceType = 'pull';
-      confidence = 0.8;
+    else if (lowVoiceRegister === 'chest') {
+      // 3. 第2音程が中間または裏声の場合 → フリップ
+      if ((midVoiceRegister === 'middle' || midVoiceRegister === 'falsetto')) {
+        finalVoiceType = 'flip';
+        confidence = 0.8;
+      }
+      else if (midVoiceRegister === 'chest') {
+        if (avgNonIntegerHarmonics > 0.6) {
+          finalVoiceType = 'pull';
+          confidence = 0.8;
+        }
+        else {
+          if (highVoiceRegister === 'chest' || highVoiceRegister === 'middle') {
+            finalVoiceType = 'mixed';
+            confidence = 0.8;
+          }
+          // 5. 第3音程が中間または裏声の場合 → フリップ
+          else if (highVoiceRegister === 'falsetto') {
+            finalVoiceType = 'flip';
+            confidence = 0.8;
+          }
+        }
+      }
     }
-    // 3. 第2音程が中間または裏声の場合 → フリップ
-    else if (midPitchRegister === 'middle' || midPitchRegister === 'falsetto') {
-      finalVoiceType = 'flip';
-      confidence = 0.8;
-    }
+
     // 4. 第3音程の3kHz周辺の音が強い場合 → ミックス
-    else if (pitchResults[highPitch.id] &&
-             pitchResults[highPitch.id].parameters &&
-             pitchResults[highPitch.id].parameters.highFrequencyRatio > 0.6) {
-      finalVoiceType = 'mixed';
-      confidence = 0.8;
-    }
-    // 5. 第3音程が中間または裏声の場合 → フリップ
-    else if (highVoiceRegister === 'middle' || highVoiceRegister === 'falsetto') {
-      finalVoiceType = 'flip';
-      confidence = 0.8;
-    }
+    
     // 6. それ以外の場合 → unknown
     else {
+      console.log('Unknown voice type based on analysis');
+      console.log('Low Pitch:', lowVoiceRegister);
+      console.log('Mid Pitch:', midVoiceRegister);
+      console.log('High Pitch:', highVoiceRegister);
+      console.log('Avg Strength 3kHz:', avgStrength3kHz);
+      console.log('Avg Strength 4kHz:', avgStrength4kHz);
+      console.log('Avg Non-Integer Harmonics:', avgNonIntegerHarmonics);
       finalVoiceType = 'unknown';
       confidence = 0.5;
     }
