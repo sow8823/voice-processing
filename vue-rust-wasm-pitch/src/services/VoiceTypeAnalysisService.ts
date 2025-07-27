@@ -262,9 +262,12 @@ export class VoiceTypeAnalysisService {
     const harmonicIndices: number[] = [];
     const harmonicWidth = Math.max(2, Math.floor(baseFrequency / 50)); // 倍音の幅（周波数が高いほど広く）
     
-    // 基本周波数と最大10倍までの倍音のインデックスを計算
-    for (let i = 1; i <= 10; i++) {
-      const harmonicFreq = baseFrequency * i;
+    // 基音から2000Hzまでの整数次倍音のインデックスを計算
+    let i = 1;
+    let harmonicFreq = baseFrequency * i;
+    
+    // 2000Hz以下の整数次倍音を計算
+    while (harmonicFreq <= 2000) {
       const harmonicIdx = Math.floor((harmonicFreq / sampleRate) * fftSize);
       
       // 倍音の周辺も含める
@@ -274,6 +277,10 @@ export class VoiceTypeAnalysisService {
           harmonicIndices.push(idx);
         }
       }
+      
+      // 次の倍音へ
+      i++;
+      harmonicFreq = baseFrequency * i;
     }
     
     // 整数次倍音のエネルギー
@@ -757,6 +764,14 @@ export class VoiceTypeAnalysisService {
     const highVoiceRegister = highPitchAnalysis.voiceRegister;
     
     // 分類条件（優先順位順）
+    
+      console.log('Unknown voice type based on analysis');
+      console.log('Low Pitch:', lowVoiceRegister);
+      console.log('Mid Pitch:', midVoiceRegister);
+      console.log('High Pitch:', highVoiceRegister);
+      console.log('Avg Strength 3kHz:', avgStrength3kHz);
+      console.log('Avg Strength 4kHz:', avgStrength4kHz);
+      console.log('Avg Non-Integer Harmonics:', avgNonIntegerHarmonics);
     // 1. 第1音程が中間または裏声の場合 → ライトチェスト
     if (lowVoiceRegister === 'middle' || lowVoiceRegister === 'falsetto') {
       finalVoiceType = 'lightChest';
@@ -770,7 +785,7 @@ export class VoiceTypeAnalysisService {
         confidence = 0.8;
       }
       else if (midVoiceRegister === 'chest') {
-        if (avgNonIntegerHarmonics > 0.6) {
+        if (avgNonIntegerHarmonics > 0.4) {
           finalVoiceType = 'pull';
           confidence = 0.8;
         }
@@ -792,13 +807,6 @@ export class VoiceTypeAnalysisService {
     
     // 6. それ以外の場合 → unknown
     else {
-      console.log('Unknown voice type based on analysis');
-      console.log('Low Pitch:', lowVoiceRegister);
-      console.log('Mid Pitch:', midVoiceRegister);
-      console.log('High Pitch:', highVoiceRegister);
-      console.log('Avg Strength 3kHz:', avgStrength3kHz);
-      console.log('Avg Strength 4kHz:', avgStrength4kHz);
-      console.log('Avg Non-Integer Harmonics:', avgNonIntegerHarmonics);
       finalVoiceType = 'unknown';
       confidence = 0.5;
     }
