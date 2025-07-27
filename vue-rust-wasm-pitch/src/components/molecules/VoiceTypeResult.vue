@@ -57,14 +57,32 @@
                     <v-icon>mdi-chart-line-variant</v-icon>
                   </template>
                   <v-list-item-title>スペクトル傾斜</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round(selectedPitchTab === 'overall' ?
-                      analysisResult.parameters.spectralSlope :
-                      selectedPitchResult?.parameters.spectralSlope || 0) }} dB/oct
+                  <v-list-item-subtitle v-if="selectedPitchTab === 'overall'">
+                    <div v-if="analysisResult.parameters.spectralSlope.low !== undefined">
+                      低音: {{ Math.round(analysisResult.parameters.spectralSlope.low) }} dB/oct,
+                      中音: {{ Math.round(analysisResult.parameters.spectralSlope.mid) }} dB/oct,
+                      高音: {{ Math.round(analysisResult.parameters.spectralSlope.high) }} dB/oct
+                      <v-progress-linear
+                        :model-value="Math.min(100, Math.abs((analysisResult.parameters.spectralSlope.low + 18) / 12 * 100))"
+                        color="primary"
+                        height="5"
+                        class="mt-1"
+                      ></v-progress-linear>
+                    </div>
+                    <div v-else>
+                      {{ Math.round(analysisResult.parameters.spectralSlope) }} dB/oct
+                      <v-progress-linear
+                        :model-value="Math.min(100, Math.abs(((analysisResult.parameters.spectralSlope) + 18) / 12 * 100))"
+                        color="primary"
+                        height="5"
+                        class="mt-1"
+                      ></v-progress-linear>
+                    </div>
+                  </v-list-item-subtitle>
+                  <v-list-item-subtitle v-else>
+                    {{ Math.round(selectedPitchResult?.parameters.spectralSlope || 0) }} dB/oct
                     <v-progress-linear
-                      :model-value="Math.min(100, Math.abs(((selectedPitchTab === 'overall' ?
-                        analysisResult.parameters.spectralSlope :
-                        selectedPitchResult?.parameters.spectralSlope || 0) + 18) / 12 * 100))"
+                      :model-value="Math.min(100, Math.abs(((selectedPitchResult?.parameters.spectralSlope || 0) + 18) / 12 * 100))"
                       color="primary"
                       height="5"
                       class="mt-1"
@@ -76,15 +94,33 @@
                   <template v-slot:prepend>
                     <v-icon>mdi-waveform</v-icon>
                   </template>
-                  <v-list-item-title>ノイズ成分の割合</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round((selectedPitchTab === 'overall' ?
-                      analysisResult.parameters.noiseRatio :
-                      selectedPitchResult?.parameters.noiseRatio || 0) * 100) }}%
+                  <v-list-item-title>非整数次倍音の割合</v-list-item-title>
+                  <v-list-item-subtitle v-if="selectedPitchTab === 'overall'">
+                    <div v-if="analysisResult.parameters.nonIntegerHarmonics.low !== undefined">
+                      低音: {{ Math.round(analysisResult.parameters.nonIntegerHarmonics.low * 100) }}%,
+                      中音: {{ Math.round(analysisResult.parameters.nonIntegerHarmonics.mid * 100) }}%,
+                      高音: {{ Math.round(analysisResult.parameters.nonIntegerHarmonics.high * 100) }}%
+                      <v-progress-linear
+                        :model-value="analysisResult.parameters.nonIntegerHarmonics.low * 100"
+                        color="primary"
+                        height="5"
+                        class="mt-1"
+                      ></v-progress-linear>
+                    </div>
+                    <div v-else>
+                      {{ Math.round(analysisResult.parameters.nonIntegerHarmonics * 100) }}%
+                      <v-progress-linear
+                        :model-value="analysisResult.parameters.nonIntegerHarmonics * 100"
+                        color="primary"
+                        height="5"
+                        class="mt-1"
+                      ></v-progress-linear>
+                    </div>
+                  </v-list-item-subtitle>
+                  <v-list-item-subtitle v-else>
+                    {{ Math.round((selectedPitchResult?.parameters.nonIntegerHarmonics || 0) * 100) }}%
                     <v-progress-linear
-                      :model-value="(selectedPitchTab === 'overall' ?
-                        analysisResult.parameters.noiseRatio :
-                        selectedPitchResult?.parameters.noiseRatio || 0) * 100"
+                      :model-value="(selectedPitchResult?.parameters.nonIntegerHarmonics || 0) * 100"
                       color="primary"
                       height="5"
                       class="mt-1"
@@ -98,14 +134,32 @@
                     <v-icon>mdi-sine-wave</v-icon>
                   </template>
                   <v-list-item-title>高周波成分の比率</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round((selectedPitchTab === 'overall' ?
-                      analysisResult.parameters.highFrequencyRatio :
-                      selectedPitchResult?.parameters.highFrequencyRatio || 0) * 100) }}%
+                  <v-list-item-subtitle v-if="selectedPitchTab === 'overall'">
+                    <div v-if="analysisResult.parameters.highFrequencyRatio.low !== undefined">
+                      低音: {{ Math.round(analysisResult.parameters.highFrequencyRatio.low * 100) }}%,
+                      中音: {{ Math.round(analysisResult.parameters.highFrequencyRatio.mid * 100) }}%,
+                      高音: {{ Math.round(analysisResult.parameters.highFrequencyRatio.high * 100) }}%
+                      <v-progress-linear
+                        :model-value="analysisResult.parameters.highFrequencyRatio.low * 100"
+                        color="primary"
+                        height="5"
+                        class="mt-1"
+                      ></v-progress-linear>
+                    </div>
+                    <div v-else>
+                      {{ Math.round(analysisResult.parameters.highFrequencyRatio * 100) }}%
+                      <v-progress-linear
+                        :model-value="analysisResult.parameters.highFrequencyRatio * 100"
+                        color="primary"
+                        height="5"
+                        class="mt-1"
+                      ></v-progress-linear>
+                    </div>
+                  </v-list-item-subtitle>
+                  <v-list-item-subtitle v-else>
+                    {{ Math.round((selectedPitchResult?.parameters.highFrequencyRatio || 0) * 100) }}%
                     <v-progress-linear
-                      :model-value="(selectedPitchTab === 'overall' ?
-                        analysisResult.parameters.highFrequencyRatio :
-                        selectedPitchResult?.parameters.highFrequencyRatio || 0) * 100"
+                      :model-value="(selectedPitchResult?.parameters.highFrequencyRatio || 0) * 100"
                       color="primary"
                       height="5"
                       class="mt-1"
