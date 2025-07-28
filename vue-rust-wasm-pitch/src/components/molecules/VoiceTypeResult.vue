@@ -238,13 +238,19 @@
                 <v-window-item value="lightChest">
                   <v-list>
                     <v-list-item>
-                      <v-list-item-title>息漏れが多い</v-list-item-title>
+                      <v-list-item-title>柔らかく、なめらかな聞き心地</v-list-item-title>
                     </v-list-item>
                     <v-list-item>
-                      <v-list-item-title>基本周波数の振幅が他の倍音成分と比べて大きい</v-list-item-title>
+                      <v-list-item-title>声帯閉鎖が弱く、閉鎖部分が薄い</v-list-item-title>
                     </v-list-item>
                     <v-list-item>
-                      <v-list-item-title>高周波数帯域のエネルギーが比較的少ない</v-list-item-title>
+                      <v-list-item-title>ファルセットに近い状態で発声されることが多い</v-list-item-title>
+                    </v-list-item>
+                    <v-list-item>
+                      <v-list-item-title>音量が小さく、伴奏に埋もれやすい</v-list-item-title>
+                    </v-list-item>
+                    <v-list-item>
+                      <v-list-item-title>音程がシャープしやすい</v-list-item-title>
                     </v-list-item>
                   </v-list>
                 </v-window-item>
@@ -252,13 +258,16 @@
                 <v-window-item value="pull">
                   <v-list>
                     <v-list-item>
-                      <v-list-item-title>地声感が強い</v-list-item-title>
+                      <v-list-item-title>舌根などにも連動して力が入り、仮声帯の振動を伴う</v-list-item-title>
                     </v-list-item>
                     <v-list-item>
-                      <v-list-item-title>倍音成分が基本周波数成分と同等以上の大きさがみられる</v-list-item-title>
+                      <v-list-item-title>非整数次倍音が多く、歪んだような音色となり力強く聞こえる</v-list-item-title>
                     </v-list-item>
                     <v-list-item>
-                      <v-list-item-title>高周波数帯域にもエネルギーが分布している</v-list-item-title>
+                      <v-list-item-title>音程がフラットしやすく、換声点付近で苦しそうに聞こえる</v-list-item-title>
+                    </v-list-item>
+                    <v-list-item>
+                      <v-list-item-title>音量が大きい</v-list-item-title>
                     </v-list-item>
                   </v-list>
                 </v-window-item>
@@ -266,16 +275,13 @@
                 <v-window-item value="flip">
                   <v-list>
                     <v-list-item>
-                      <v-list-item-title>低音と高音の間で声質が著しく変化する</v-list-item-title>
+                      <v-list-item-title>中高音域で声が「ひっくり返る」ように変化する</v-list-item-title>
                     </v-list-item>
                     <v-list-item>
-                      <v-list-item-title>低音では倍音が豊かで声量が大きい</v-list-item-title>
+                      <v-list-item-title>低音域と高音域で声質が極端に異なる</v-list-item-title>
                     </v-list-item>
                     <v-list-item>
-                      <v-list-item-title>高音では基音優位になり声量が小さくなる</v-list-item-title>
-                    </v-list-item>
-                    <v-list-item>
-                      <v-list-item-title>特定の音程で声質が急激に変化する（ヨーデル的特徴）</v-list-item-title>
+                      <v-list-item-title>音域によってニュアンスを大きく変化させることができる</v-list-item-title>
                     </v-list-item>
                   </v-list>
                 </v-window-item>
@@ -283,16 +289,13 @@
                 <v-window-item value="mixed">
                   <v-list>
                     <v-list-item>
-                      <v-list-item-title>低音から高音まで声質の変化が少ない</v-list-item-title>
+                      <v-list-item-title>非整数次倍音が少なく、歪みが少ない</v-list-item-title>
                     </v-list-item>
                     <v-list-item>
-                      <v-list-item-title>全体的に声量が大きい</v-list-item-title>
+                      <v-list-item-title>共鳴が豊かで、伴奏に埋もれにくく、音量も大きく明瞭</v-list-item-title>
                     </v-list-item>
                     <v-list-item>
-                      <v-list-item-title>倍音成分が豊か</v-list-item-title>
-                    </v-list-item>
-                    <v-list-item>
-                      <v-list-item-title>3kHz周辺の周波数成分が強く、明るく響く声</v-list-item-title>
+                      <v-list-item-title>低音域から高音域まで、ニュアンスを揃えたまま発声</v-list-item-title>
                     </v-list-item>
                   </v-list>
                 </v-window-item>

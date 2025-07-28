@@ -218,44 +218,112 @@ export class VoiceTypeAnalysisService {
     return false;
   }
   
-  /**
-   * 特定の周波数帯域の強度を分析する
-   * @param frequencyData 周波数データ
-   * @param minFrequency 最小周波数（Hz）
-   * @param maxFrequency 最大周波数（Hz）
-   * @param sampleRate サンプリングレート
-   * @returns 強度（0-1）
-   */
-  analyzeFrequencyBandStrength(
-    frequencyData: Uint8Array,
-    minFrequency: number,
-    maxFrequency: number,
-    sampleRate: number
-  ): number {
-    const fftSize = frequencyData.length * 2;
-    const minIndex = Math.floor((minFrequency / sampleRate) * fftSize);
-    const maxIndex = Math.ceil((maxFrequency / sampleRate) * fftSize);
+  // /**
+  //  * 特定の周波数帯域の強度を分析する
+  //  * @param frequencyData 周波数データ
+  //  * @param minFrequency 最小周波数（Hz）
+  //  * @param maxFrequency 最大周波数（Hz）
+  //  * @param sampleRate サンプリングレート
+  //  * @returns 強度（0-1）
+  //  */
+  // analyzeFrequencyBandStrength(
+  //   frequencyData: Uint8Array,
+  //   minFrequency: number,
+  //   maxFrequency: number,
+  //   sampleRate: number
+  // ): number {
+  //   const fftSize = frequencyData.length * 2;
+  //   const minIndex = Math.floor((minFrequency / sampleRate) * fftSize);
+  //   const maxIndex = Math.ceil((maxFrequency / sampleRate) * fftSize);
     
-    // 帯域内の最大振幅を検索
-    let maxAmp = 0;
-    for (let i = minIndex; i <= maxIndex; i++) {
-      if (i >= 0 && i < frequencyData.length && frequencyData[i] > maxAmp) {
-        maxAmp = frequencyData[i];
-      }
-    }
+  //   // 帯域内の最大振幅を検索
+  //   let maxAmp = 0;
+  //   for (let i = minIndex; i <= maxIndex; i++) {
+  //     if (i >= 0 && i < frequencyData.length && frequencyData[i] > maxAmp) {
+  //       maxAmp = frequencyData[i];
+  //     }
+  //   }
     
-    // 全体の最大振幅を検索
-    let totalMaxAmp = 0;
-    for (let i = 0; i < frequencyData.length; i++) {
-      if (frequencyData[i] > totalMaxAmp) {
-        totalMaxAmp = frequencyData[i];
-      }
-    }
+  //   // 全体の最大振幅を検索
+  //   let totalMaxAmp = 0;
+  //   for (let i = 0; i < frequencyData.length; i++) {
+  //     if (frequencyData[i] > totalMaxAmp) {
+  //       totalMaxAmp = frequencyData[i];
+  //     }
+  //   }
     
-    // 相対的な強度を計算（0-1）
-    return totalMaxAmp > 0 ? maxAmp / totalMaxAmp : 0;
-  }
+  //   // 相対的な強度を計算（0-1）
+  //   return totalMaxAmp > 0 ? maxAmp / totalMaxAmp : 0;
+  // }
   
+  
+  /**
+   * 高周波数帯域のエネルギー比率を計算する
+   * @param frequencyData 周波数データ
+   * @param sampleRate サンプリングレート
+   * @returns 高周波数帯域のエネルギー比率
+   */
+  calculateHighFrequencyRatio(frequencyData: Uint8Array, sampleRate: number, targetFrequencyStart: number, targetFrequencyEnd: number, fundamentalFrequency?: number): number {
+    const fftSize = frequencyData.length * 2;
+    
+    // 2kHz以上の周波数帯域のインデックスを計算
+    const highFreqStartIdx = Math.floor((targetFrequencyStart / sampleRate) * fftSize);
+    const highFreqEndIdx = Math.floor((targetFrequencyEnd / sampleRate) * fftSize);
+    
+    // 基音成分のインデックスと振幅を推定
+    let baseAmp = 0;
+    let baseIdx = 0;
+    
+    if (fundamentalFrequency) {
+      // 決められた基音から±5%以内の周波数のうち、最も大きい振幅を持つ成分を基音成分とする
+      const rangePercent = 0.05; // 5%
+      const minFrequency = fundamentalFrequency * (1 - rangePercent);
+      const maxFrequency = fundamentalFrequency * (1 + rangePercent);
+      
+      // 周波数インデックスの範囲を計算
+      const minIndex = Math.floor((minFrequency / sampleRate) * fftSize);
+      const maxIndex = Math.ceil((maxFrequency / sampleRate) * fftSize);
+      
+      // 範囲内で最も強いスペクトル成分を見つける
+      for (let i = minIndex; i <= maxIndex; i++) {
+        if (i >= 0 && i < frequencyData.length && frequencyData[i] > baseAmp) {
+          baseAmp = frequencyData[i];
+          baseIdx = i;
+        }
+      }
+    } else {
+      // fundamentalFrequencyが指定されていない場合は、低周波数帯域で最も強い成分を基音と見なす
+      const lowFreqStartIdx = Math.floor((100 / sampleRate) * fftSize);
+      const lowFreqEndIdx = Math.floor((1000 / sampleRate) * fftSize);
+      
+      for (let i = lowFreqStartIdx; i <= lowFreqEndIdx; i++) {
+        if (i < frequencyData.length && frequencyData[i] > baseAmp) {
+          baseAmp = frequencyData[i];
+          baseIdx = i;
+        }
+      }
+    }
+    
+    // 基音の振幅が0の場合は0を返す
+    if (baseAmp === 0) return 0;
+    
+    // 2kHz以上の周波数帯域で最も強い成分を見つける
+    let maxHighFreqAmp = 0;
+    
+    // for (let i = highFreqStartIdx; i < frequencyData.length; i++) {
+    for (let i = highFreqStartIdx; i < highFreqEndIdx; i++) {
+      if (frequencyData[i] > maxHighFreqAmp) {
+        maxHighFreqAmp = frequencyData[i];
+      }
+    }
+    
+    // 2kHz以上の最大振幅成分の、基音成分に対する振幅比を計算
+    return maxHighFreqAmp / baseAmp;
+  }
+
+
+
+
   /**
    * 非整数次倍音の量を分析する
    * @param frequencyData 周波数データ
@@ -354,9 +422,9 @@ export class VoiceTypeAnalysisService {
         sampleRate
       );
       
-      const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, pitch.frequency);
+      const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, 2000, 5000, pitch.frequency);
+
       // 非整数次倍音を分析
-      
       const nonIntegerHarmonics = this.analyzeNonIntegerHarmonics(freqData, pitch.frequency, sampleRate);
       // 基音の振幅を計算
       const fftSize = freqData.length * 2;
@@ -435,16 +503,12 @@ export class VoiceTypeAnalysisService {
     parameters: {
       spectralSlope: number;
       highFrequencyRatio: number;
-      strength3kHz: number;
-      strength4kHz: number;
       nonIntegerHarmonics: number;
     };
   } {
     // 複数フレームの平均値を計算
     let totalSpectralSlope = 0;
     let totalHighFrequencyRatio = 0;
-    let totalStrength3kHz = 0;
-    let totalStrength4kHz = 0;
     let totalNonIntegerHarmonics = 0;
     let validFrameCount = 0;
     
@@ -464,12 +528,8 @@ export class VoiceTypeAnalysisService {
         sampleRate
       );
       
-      const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, pitch.frequency);
+      const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, 2000, 5000, pitch.frequency);
       // 非整数次倍音を分析
-      
-      // 3kHzと4kHz周辺の強度を分析
-      const strength3kHz = this.analyzeFrequencyBandStrength(freqData, 2800, 3200, sampleRate);
-      const strength4kHz = this.analyzeFrequencyBandStrength(freqData, 3800, 4200, sampleRate);
       const nonIntegerHarmonics = this.analyzeNonIntegerHarmonics(freqData, pitch.frequency, sampleRate);
       
       // 基音の振幅を計算
@@ -484,8 +544,6 @@ export class VoiceTypeAnalysisService {
           baseAmplitude >= 4) { // 振幅が4以上あるかチェック
         totalSpectralSlope += harmonicResult.spectralSlope;
         totalHighFrequencyRatio += highFrequencyRatio;
-        totalStrength3kHz += strength3kHz;
-        totalStrength4kHz += strength4kHz;
         totalNonIntegerHarmonics += nonIntegerHarmonics;
         validFrameCount++;
       }
@@ -496,16 +554,12 @@ export class VoiceTypeAnalysisService {
       validFrameCount = 1; // ゼロ除算を防ぐ
       totalSpectralSlope = -10; // 中間的な値
       totalHighFrequencyRatio = 0.2;
-      totalStrength3kHz = 0.3;
-      totalStrength4kHz = 0.3;
       totalNonIntegerHarmonics = 0.3;
     }
     
     // 平均値を計算
     const avgSpectralSlope = totalSpectralSlope / validFrameCount;
     const avgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
-    const avgStrength3kHz = totalStrength3kHz / validFrameCount;
-    const avgStrength4kHz = totalStrength4kHz / validFrameCount;
     const avgNonIntegerHarmonics = totalNonIntegerHarmonics / validFrameCount;
     
     // スペクトル傾斜による判定
@@ -534,8 +588,6 @@ export class VoiceTypeAnalysisService {
       parameters: {
         spectralSlope: avgSpectralSlope,
         highFrequencyRatio: avgHighFrequencyRatio,
-        strength3kHz: avgStrength3kHz,
-        strength4kHz: avgStrength4kHz,
         nonIntegerHarmonics: avgNonIntegerHarmonics
       }
     };
@@ -558,13 +610,11 @@ export class VoiceTypeAnalysisService {
       spectralSlope: number;
       highFrequencyRatio: number;
       nonIntegerHarmonics: number;
-      strength3kHz?: number;
     };
   } {
     // 複数フレームの平均値を計算
     let totalSpectralSlope = 0;
     let totalHighFrequencyRatio = 0;
-    let totalStrength3kHz = 0;
     let validFrameCount = 0;
     let totalNonIntegerHarmonics = 0;
     
@@ -584,12 +634,9 @@ export class VoiceTypeAnalysisService {
         sampleRate
       );
       
-      const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, pitch.frequency);
+      const highFrequencyRatio = this.calculateHighFrequencyRatio(freqData, sampleRate, 2000, 5000, pitch.frequency);
       // 非整数次倍音を分析
       const nonIntegerHarmonics = this.analyzeNonIntegerHarmonics(freqData, pitch.frequency, sampleRate);
-      
-      // 3kHz周辺の強度を分析
-      const strength3kHz = this.analyzeFrequencyBandStrength(freqData, 2800, 3200, sampleRate);
       
       // 基音の振幅を計算
       const fftSize = freqData.length * 2;
@@ -603,7 +650,6 @@ export class VoiceTypeAnalysisService {
           baseAmplitude >= 4) { // 振幅が4以上あるかチェック
         totalSpectralSlope += harmonicResult.spectralSlope;
         totalHighFrequencyRatio += highFrequencyRatio;
-        totalStrength3kHz += strength3kHz;
         totalNonIntegerHarmonics += nonIntegerHarmonics;
         validFrameCount++;
       }
@@ -614,14 +660,12 @@ export class VoiceTypeAnalysisService {
       validFrameCount = 1; // ゼロ除算を防ぐ
       totalSpectralSlope = -10; // 中間的な値
       totalHighFrequencyRatio = 0.2;
-      totalStrength3kHz = 0.3;
       totalNonIntegerHarmonics = 0.3;
     }
     
     // 平均値を計算
     const avgSpectralSlope = totalSpectralSlope / validFrameCount;
     const avgHighFrequencyRatio = totalHighFrequencyRatio / validFrameCount;
-    const avgStrength3kHz = totalStrength3kHz / validFrameCount;
     const avgNonIntegerHarmonics = totalNonIntegerHarmonics / validFrameCount;
 
     // スペクトル傾斜による判定
@@ -650,7 +694,6 @@ export class VoiceTypeAnalysisService {
       parameters: {
         spectralSlope: avgSpectralSlope,
         highFrequencyRatio: avgHighFrequencyRatio,
-        strength3kHz: avgStrength3kHz,
         nonIntegerHarmonics: avgNonIntegerHarmonics
       }
     };
@@ -751,9 +794,6 @@ export class VoiceTypeAnalysisService {
       voiceRegister: midPitchAnalysis.voiceRegister
     };
     
-    // 3kHzと4kHz周辺の強度を取得
-    const avgStrength3kHz = midPitchAnalysis.parameters.strength3kHz || 0;
-    const avgStrength4kHz = midPitchAnalysis.parameters.strength4kHz || 0;
     const avgMidNonIntegerHarmonics = midPitchAnalysis.parameters.nonIntegerHarmonics || 0;
     
     // 高音の分析
@@ -822,9 +862,10 @@ export class VoiceTypeAnalysisService {
       console.log('Low Pitch:', lowVoiceRegister);
       console.log('Mid Pitch:', midVoiceRegister);
       console.log('High Pitch:', highVoiceRegister);
-      console.log('Avg Strength 3kHz:', avgStrength3kHz);
-      console.log('Avg Strength 4kHz:', avgStrength4kHz);
       console.log('Avg Non-Integer Harmonics:', avgMidNonIntegerHarmonics);
+      console.log('Avg highFrequencyRatioLow:', avgParameters.highFrequencyRatio.low);
+      console.log('Avg highFrequencyRatioMid:', avgParameters.highFrequencyRatio.mid);
+      console.log('Avg highFrequencyRatioHigh:', avgParameters.highFrequencyRatio.high);
     // 1. 第1音程が中間または裏声の場合 → ライトチェスト
     if (lowVoiceRegister === 'middle' || lowVoiceRegister === 'falsetto') {
       finalVoiceType = 'lightChest';
@@ -838,7 +879,7 @@ export class VoiceTypeAnalysisService {
         confidence = 0.8;
       }
       else if (midVoiceRegister === 'chest') {
-        if (avgMidNonIntegerHarmonics > 0.4) {
+        if (avgMidNonIntegerHarmonics > 0.4 || avgParameters.highFrequencyRatio.mid < 0.5) {
           finalVoiceType = 'pull';
           confidence = 0.8;
         }
@@ -1096,67 +1137,69 @@ export class VoiceTypeAnalysisService {
   //   }
   // }
 
-  /**
-   * 高周波数帯域のエネルギー比率を計算する
-   * @param frequencyData 周波数データ
-   * @param sampleRate サンプリングレート
-   * @returns 高周波数帯域のエネルギー比率
-   */
-  calculateHighFrequencyRatio(frequencyData: Uint8Array, sampleRate: number, targetFrequency?: number): number {
-    const fftSize = frequencyData.length * 2;
+  // /**
+  //  * 高周波数帯域のエネルギー比率を計算する
+  //  * @param frequencyData 周波数データ
+  //  * @param sampleRate サンプリングレート
+  //  * @returns 高周波数帯域のエネルギー比率
+  //  */
+  // calculateHighFrequencyRatio(frequencyData: Uint8Array, sampleRate: number, targetFrequency?: number): number {
+  //   const fftSize = frequencyData.length * 2;
     
-    // 2kHz以上の周波数帯域のインデックスを計算
-    const highFreqStartIdx = Math.floor((2000 / sampleRate) * fftSize);
+  //   // 2kHz以上の周波数帯域のインデックスを計算
+  //   const highFreqStartIdx = Math.floor((2000 / sampleRate) * fftSize);
+  //   const highFreqEndIdx = Math.floor((5000 / sampleRate) * fftSize);
     
-    // 基音成分のインデックスと振幅を推定
-    let baseAmp = 0;
-    let baseIdx = 0;
+  //   // 基音成分のインデックスと振幅を推定
+  //   let baseAmp = 0;
+  //   let baseIdx = 0;
     
-    if (targetFrequency) {
-      // 決められた基音から±5%以内の周波数のうち、最も大きい振幅を持つ成分を基音成分とする
-      const rangePercent = 0.05; // 5%
-      const minFrequency = targetFrequency * (1 - rangePercent);
-      const maxFrequency = targetFrequency * (1 + rangePercent);
+  //   if (targetFrequency) {
+  //     // 決められた基音から±5%以内の周波数のうち、最も大きい振幅を持つ成分を基音成分とする
+  //     const rangePercent = 0.05; // 5%
+  //     const minFrequency = targetFrequency * (1 - rangePercent);
+  //     const maxFrequency = targetFrequency * (1 + rangePercent);
       
-      // 周波数インデックスの範囲を計算
-      const minIndex = Math.floor((minFrequency / sampleRate) * fftSize);
-      const maxIndex = Math.ceil((maxFrequency / sampleRate) * fftSize);
+  //     // 周波数インデックスの範囲を計算
+  //     const minIndex = Math.floor((minFrequency / sampleRate) * fftSize);
+  //     const maxIndex = Math.ceil((maxFrequency / sampleRate) * fftSize);
       
-      // 範囲内で最も強いスペクトル成分を見つける
-      for (let i = minIndex; i <= maxIndex; i++) {
-        if (i >= 0 && i < frequencyData.length && frequencyData[i] > baseAmp) {
-          baseAmp = frequencyData[i];
-          baseIdx = i;
-        }
-      }
-    } else {
-      // targetFrequencyが指定されていない場合は、低周波数帯域で最も強い成分を基音と見なす
-      const lowFreqStartIdx = Math.floor((100 / sampleRate) * fftSize);
-      const lowFreqEndIdx = Math.floor((1000 / sampleRate) * fftSize);
+  //     // 範囲内で最も強いスペクトル成分を見つける
+  //     for (let i = minIndex; i <= maxIndex; i++) {
+  //       if (i >= 0 && i < frequencyData.length && frequencyData[i] > baseAmp) {
+  //         baseAmp = frequencyData[i];
+  //         baseIdx = i;
+  //       }
+  //     }
+  //   } else {
+  //     // targetFrequencyが指定されていない場合は、低周波数帯域で最も強い成分を基音と見なす
+  //     const lowFreqStartIdx = Math.floor((100 / sampleRate) * fftSize);
+  //     const lowFreqEndIdx = Math.floor((1000 / sampleRate) * fftSize);
       
-      for (let i = lowFreqStartIdx; i <= lowFreqEndIdx; i++) {
-        if (i < frequencyData.length && frequencyData[i] > baseAmp) {
-          baseAmp = frequencyData[i];
-          baseIdx = i;
-        }
-      }
-    }
+  //     for (let i = lowFreqStartIdx; i <= lowFreqEndIdx; i++) {
+  //       if (i < frequencyData.length && frequencyData[i] > baseAmp) {
+  //         baseAmp = frequencyData[i];
+  //         baseIdx = i;
+  //       }
+  //     }
+  //   }
     
-    // 基音の振幅が0の場合は0を返す
-    if (baseAmp === 0) return 0;
+  //   // 基音の振幅が0の場合は0を返す
+  //   if (baseAmp === 0) return 0;
     
-    // 2kHz以上の周波数帯域で最も強い成分を見つける
-    let maxHighFreqAmp = 0;
+  //   // 2kHz以上の周波数帯域で最も強い成分を見つける
+  //   let maxHighFreqAmp = 0;
     
-    for (let i = highFreqStartIdx; i < frequencyData.length; i++) {
-      if (frequencyData[i] > maxHighFreqAmp) {
-        maxHighFreqAmp = frequencyData[i];
-      }
-    }
+  //   // for (let i = highFreqStartIdx; i < frequencyData.length; i++) {
+  //   for (let i = highFreqStartIdx; i < highFreqEndIdx; i++) {
+  //     if (frequencyData[i] > maxHighFreqAmp) {
+  //       maxHighFreqAmp = frequencyData[i];
+  //     }
+  //   }
     
-    // 2kHz以上の最大振幅成分の、基音成分に対する振幅比を計算
-    return maxHighFreqAmp / baseAmp;
-  }
+  //   // 2kHz以上の最大振幅成分の、基音成分に対する振幅比を計算
+  //   return maxHighFreqAmp / baseAmp;
+  // }
 
   /**
    * ノイズ成分の割合を推定する
