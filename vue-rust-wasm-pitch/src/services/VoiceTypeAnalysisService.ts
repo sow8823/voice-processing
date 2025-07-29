@@ -4,7 +4,7 @@
 import type { HarmonicAnalysisResult } from './FrequencyAnalysisService';
 
 // 声区の定義
-export type VoiceRegister = 'chest' | 'falsetto' | 'middle';
+export type VoiceRegister = 'modal' | 'falsetto' | 'middle';
 
 // ボイスタイプの定義を拡張（フリップとミックスを追加）
 export type VoiceType = 'lightChest' | 'pull' | 'flip' | 'mixed' | 'unknown';
@@ -219,7 +219,7 @@ export class VoiceTypeAnalysisService {
     sampleRate: number
   ): number {
     const fftSize = frequencyData.length * 2;
-    
+    console.log('fftSize:', fftSize);
     // 整数次倍音のインデックスを計算
     const harmonicIndices: number[] = [];
     const harmonicWidth = Math.max(2, Math.floor(baseFrequency / 50)); // 倍音の幅（周波数が高いほど広く）
@@ -232,13 +232,26 @@ export class VoiceTypeAnalysisService {
     while (harmonicFreq <= 2000) {
       const harmonicIdx = Math.floor((harmonicFreq / sampleRate) * fftSize);
       
-      // 倍音の周辺も含める
-      for (let j = -harmonicWidth; j <= harmonicWidth; j++) {
-        const idx = harmonicIdx + j;
-        if (idx >= 0 && idx < frequencyData.length) {
-          harmonicIndices.push(idx);
+      const rangePercent = 0.03; // 3%
+      const minFrequency = harmonicFreq * (1 - rangePercent);
+      const maxFrequency = harmonicFreq * (1 + rangePercent);
+      
+      // 周波数インデックスの範囲を計算
+      const minIndex = Math.floor((minFrequency / sampleRate) * fftSize);
+      const maxIndex = Math.ceil((maxFrequency / sampleRate) * fftSize);
+      // 範囲内のインデックスを追加
+      for (let i = minIndex; i <= maxIndex; i++) {
+        if (i >= 0 && i < frequencyData.length) {
+          harmonicIndices.push(i);
         }
       }
+      // // 倍音の周辺も含める
+      // for (let j = -harmonicWidth; j <= harmonicWidth; j++) {
+      //   const idx = harmonicIdx + j;
+      //   if (idx >= 0 && idx < frequencyData.length) {
+      //     harmonicIndices.push(idx);
+      //   }
+      // }
       
       // 次の倍音へ
       i++;
@@ -253,7 +266,8 @@ export class VoiceTypeAnalysisService {
     
     // 全体のエネルギー
     let totalEnergy = 0;
-    for (let i = 0; i < frequencyData.length; i++) {
+    // for (let i = 0; i < frequencyData.length; i++) {
+    for (let i = 0; i < Math.floor((2000 / sampleRate) * fftSize); i++) {
       totalEnergy += frequencyData[i] * frequencyData[i];
     }
     
@@ -328,7 +342,7 @@ export class VoiceTypeAnalysisService {
     // 有効なフレームがない場合はデフォルト値を設定
     if (validFrameCount === 0) {
       validFrameCount = 1; // ゼロ除算を防ぐ
-      totalSpectralSlope = -10; // 中間的な値
+      totalSpectralSlope = 0; // 中間的な値
       totalHighFrequencyRatio = 0.2;
       totalNonIntegerHarmonics = 0.3;
     }
@@ -339,24 +353,21 @@ export class VoiceTypeAnalysisService {
     const avgNonIntegerHarmonics = totalNonIntegerHarmonics / validFrameCount;
     
     // スペクトル傾斜による判定
-    const isChestBySlope = avgSpectralSlope >= -10 && avgSpectralSlope <= -2;
-    const isMiddleBySlope = avgSpectralSlope < -10 && avgSpectralSlope >= -13;
-    const isFalsettoBySlope = avgSpectralSlope < -13;
+    const isChestBySlope = avgSpectralSlope >= -8 && avgSpectralSlope <= -2;
+    const isMiddleBySlope = avgSpectralSlope < -8 && avgSpectralSlope >= -11;
+    const isFalsettoBySlope = avgSpectralSlope < -11;
     
     // 高周波成分の強度による判定
-    const hasStrongHighFreq = avgHighFrequencyRatio >= 0.25;
+    const hasStrongHighFreq = avgHighFrequencyRatio >= 0.3;
     
     // 総合判定
     let voiceRegister: VoiceRegister = 'middle';
     if (isChestBySlope && hasStrongHighFreq) {
-      // 両方の条件で地声傾向
-      voiceRegister = 'chest';
-    } else if (!hasStrongHighFreq) {
-      // 高周波成分の強度で裏声傾向
-      voiceRegister = 'falsetto';
-    } else {
-      // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
+      voiceRegister = 'modal';
+    } else if (hasStrongHighFreq) {
       voiceRegister = 'middle';
+    } else {
+      voiceRegister = 'falsetto';
     }
     
     return {
@@ -434,7 +445,7 @@ export class VoiceTypeAnalysisService {
     // 有効なフレームがない場合はデフォルト値を設定
     if (validFrameCount === 0) {
       validFrameCount = 1; // ゼロ除算を防ぐ
-      totalSpectralSlope = -10; // 中間的な値
+      totalSpectralSlope = 0; // 中間的な値
       totalHighFrequencyRatio = 0.2;
       totalNonIntegerHarmonics = 0.3;
     }
@@ -445,24 +456,21 @@ export class VoiceTypeAnalysisService {
     const avgNonIntegerHarmonics = totalNonIntegerHarmonics / validFrameCount;
     
     // スペクトル傾斜による判定
-    const isChestBySlope = avgSpectralSlope >= -10 && avgSpectralSlope <= -2;
-    const isMiddleBySlope = avgSpectralSlope < -10 && avgSpectralSlope >= -13;
-    const isFalsettoBySlope = avgSpectralSlope < -13;
+    const isChestBySlope = avgSpectralSlope >= -8 && avgSpectralSlope <= -2;
+    const isMiddleBySlope = avgSpectralSlope < -8 && avgSpectralSlope >= -11;
+    const isFalsettoBySlope = avgSpectralSlope < -11;
     
     // 高周波成分の強度による判定
-    const hasStrongHighFreq = avgHighFrequencyRatio >= 0.25;
+    const hasStrongHighFreq = avgHighFrequencyRatio >= 0.3;
     
     // 総合判定
     let voiceRegister: VoiceRegister = 'middle';
     if (isChestBySlope && hasStrongHighFreq) {
-      // 両方の条件で地声傾向
-      voiceRegister = 'chest';
-    } else if (!hasStrongHighFreq) {
-      // 高周波成分の強度で裏声傾向
-      voiceRegister = 'falsetto';
-    } else {
-      // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
+      voiceRegister = 'modal';
+    } else if (hasStrongHighFreq) {
       voiceRegister = 'middle';
+    } else {
+      voiceRegister = 'falsetto';
     }
     
     return {
@@ -540,7 +548,7 @@ export class VoiceTypeAnalysisService {
     // 有効なフレームがない場合はデフォルト値を設定
     if (validFrameCount === 0) {
       validFrameCount = 1; // ゼロ除算を防ぐ
-      totalSpectralSlope = -10; // 中間的な値
+      totalSpectralSlope = 0; // 中間的な値
       totalHighFrequencyRatio = 0.2;
       totalNonIntegerHarmonics = 0.3;
     }
@@ -551,24 +559,21 @@ export class VoiceTypeAnalysisService {
     const avgNonIntegerHarmonics = totalNonIntegerHarmonics / validFrameCount;
 
     // スペクトル傾斜による判定
-    const isChestBySlope = avgSpectralSlope >= -10 && avgSpectralSlope <= -2;
-    const isMiddleBySlope = avgSpectralSlope < -10 && avgSpectralSlope >= -13;
-    const isFalsettoBySlope = avgSpectralSlope < -13;
+    const isChestBySlope = avgSpectralSlope >= -8 && avgSpectralSlope <= -2;
+    const isMiddleBySlope = avgSpectralSlope < -8 && avgSpectralSlope >= -11;
+    const isFalsettoBySlope = avgSpectralSlope < -11;
     
     // 高周波成分の強度による判定
-    const hasStrongHighFreq = avgHighFrequencyRatio >= 0.25;
+    const hasStrongHighFreq = avgHighFrequencyRatio >= 0.3;
     
     // 総合判定
     let voiceRegister: VoiceRegister = 'middle';
     if (isChestBySlope && hasStrongHighFreq) {
-      // 両方の条件で地声傾向
-      voiceRegister = 'chest';
-    } else if (!hasStrongHighFreq) {
-      // 高周波成分の強度で裏声傾向
-      voiceRegister = 'falsetto';
-    } else {
-      // 高周波成分の強度で地声傾向かつスペクトル傾斜で裏声傾向または中間傾向
+      voiceRegister = 'modal';
+    } else if (hasStrongHighFreq) {
       voiceRegister = 'middle';
+    } else {
+      voiceRegister = 'falsetto';
     }
     
     return {
@@ -592,8 +597,8 @@ export class VoiceTypeAnalysisService {
    */
   analyzeMultiplePitches(
     frequencyDataArrays: Record<string, Uint8Array[]>,
-    pitchDataArrays: Record<string, number[]>,
-    timestampsArrays: Record<string, number[]>,
+    // pitchDataArrays: Record<string, number[]>,
+    // timestampsArrays: Record<string, number[]>,
     sampleRate: number,
     gender: 'male' | 'female'
   ): VoiceTypeAnalysisResult {
@@ -748,19 +753,19 @@ export class VoiceTypeAnalysisService {
       confidence = 0.8;
     }
     // 2. 第2音程の4kHz周辺の成分が強く、非整数次倍音が多い場合 → プル
-    else if (lowVoiceRegister === 'chest') {
+    else if (lowVoiceRegister === 'modal') {
       // 3. 第2音程が中間または裏声の場合 → フリップ
-      if ((midVoiceRegister === 'middle' || midVoiceRegister === 'falsetto')) {
+      if ((midVoiceRegister === 'falsetto' || avgParameters.highFrequencyRatio.mid < 0.4)) {
         finalVoiceType = 'flip';
         confidence = 0.8;
       }
-      else if (midVoiceRegister === 'chest') {
-        if (avgMidNonIntegerHarmonics > 0.4 || avgParameters.highFrequencyRatio.mid < 0.5) {
+      else if (midVoiceRegister === 'middle' || midVoiceRegister === 'modal') {
+        if (avgMidNonIntegerHarmonics > 0.4) {
           finalVoiceType = 'pull';
           confidence = 0.8;
         }
         else {
-          if (highVoiceRegister === 'chest' || highVoiceRegister === 'middle') {
+          if (highVoiceRegister === 'modal' || highVoiceRegister === 'middle') {
             finalVoiceType = 'mixed';
             confidence = 0.8;
           }
@@ -868,7 +873,8 @@ export class VoiceTypeAnalysisService {
     
     // 有効な周波数範囲を決定（ノイズを避けるため、基本周波数から上限までを考慮）
     const slopeStartIdx = Math.max(1, baseIdx - 5); // 基本周波数の少し下から
-    const slopeEndIdx = Math.min(frequencyData.length - 1, Math.round((baseFrequency * 10 / sampleRate) * fftSize)); // 基本周波数の10倍まで
+    // const slopeEndIdx = Math.min(frequencyData.length - 1, Math.round((baseFrequency * 10 / sampleRate) * fftSize)); // 基本周波数の10倍まで
+    const slopeEndIdx = Math.min(frequencyData.length - 1, Math.round((2000 / sampleRate) * fftSize)); // 基本周波数の10倍まで
     
     // 周波数と振幅の配列を作成（対数スケールに変換）
     const frequencies: number[] = [];
@@ -888,11 +894,13 @@ export class VoiceTypeAnalysisService {
         amplitudesDB.push(20 * Math.log10(amplitude / 255));
       }
     }
-    
+    console.log('Frequencies:', frequencies);
     // データが不足している場合は計算できない
     if (frequencies.length < 2) {
+      console.log('baseFrequency:', baseFrequency);
+      console.log('Insufficient data for spectral slope calculation');
       return {
-        spectralSlope: -10, // デフォルト値として中間的な値を設定
+        spectralSlope: 0,
         bandPeakRatio: 0,
         highFreqRatio: 0
       };
@@ -947,6 +955,7 @@ export class VoiceTypeAnalysisService {
     
     const highFreqRatio = (highFreqMaxAmp / baseAmp) * 100;
     
+    console.log('Spectral Slope:', spectralSlope);
     return {
       spectralSlope,
       bandPeakRatio,
