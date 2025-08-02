@@ -11,7 +11,7 @@
       </v-tab>
       <v-tab value="voicetype">
         <v-icon start>mdi-account-voice</v-icon>
-        ボイスタイプ分析
+        ボイスタイプ分類
       </v-tab>
     </v-tabs>
 

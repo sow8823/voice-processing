@@ -172,14 +172,14 @@ const getColor = (value: number): [number, number, number, number] => {
 
 // 目盛りとマーカーを描画する関数
 const drawScalesAndMarkers = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-  const maxFrequency = 10000;
+  const maxFrequency = 5000;
   
   // 周波数目盛りを描画（y軸）
   ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
   ctx.font = '10px sans-serif';
   ctx.textAlign = 'right';
   
-  for (let i = 0; i <= maxFrequency; i += 2000) {
+  for (let i = 0; i <= maxFrequency; i += 1000) {
     // 周波数を反転（低周波数が下、高周波数が上）
     const y = height - (i / maxFrequency) * height;
     ctx.fillText(`${i/1000}k`, 25, y);

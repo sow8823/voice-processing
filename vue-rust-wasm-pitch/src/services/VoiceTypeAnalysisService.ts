@@ -158,7 +158,7 @@ export class VoiceTypeAnalysisService {
     
     if (fundamentalFrequency) {
       // 決められた基音から±5%以内の周波数のうち、最も大きい振幅を持つ成分を基音成分とする
-      const rangePercent = 0.05; // 5%
+      const rangePercent = 0.04; // 4%
       const minFrequency = fundamentalFrequency * (1 - rangePercent);
       const maxFrequency = fundamentalFrequency * (1 + rangePercent);
       
@@ -186,9 +186,8 @@ export class VoiceTypeAnalysisService {
       }
     }
     
-    // 基音の振幅が0の場合は0を返す
-    if (baseAmp === 0) return 0;
-    
+    // 基音の振幅が0または非常に小さい場合は0を返す
+    if (baseAmp < 10) return 0;
     // 2kHz以上の周波数帯域で最も強い成分を見つける
     let maxHighFreqAmp = 0;
     
@@ -200,6 +199,8 @@ export class VoiceTypeAnalysisService {
     }
     
     // 2kHz以上の最大振幅成分の、基音成分に対する振幅比を計算
+    // 比率が1（100%）を超えないように制限する
+    // return Math.min(1.0, maxHighFreqAmp / baseAmp);
     return maxHighFreqAmp / baseAmp;
   }
 
@@ -232,7 +233,7 @@ export class VoiceTypeAnalysisService {
     while (harmonicFreq <= 2000) {
       const harmonicIdx = Math.floor((harmonicFreq / sampleRate) * fftSize);
       
-      const rangePercent = 0.03; // 3%
+      const rangePercent = 0.04; // 4%
       const minFrequency = harmonicFreq * (1 - rangePercent);
       const maxFrequency = harmonicFreq * (1 + rangePercent);
       
@@ -331,7 +332,7 @@ export class VoiceTypeAnalysisService {
       if (!isNaN(harmonicResult.spectralSlope) &&
           !isNaN(highFrequencyRatio) &&
           !isNaN(nonIntegerHarmonics) &&
-          baseAmplitude >= 4) { // 振幅が4以上あるかチェック
+          baseAmplitude >= 10) { // 振幅が4以上あるかチェック
         totalSpectralSlope += harmonicResult.spectralSlope;
         totalHighFrequencyRatio += highFrequencyRatio;
         totalNonIntegerHarmonics += nonIntegerHarmonics;
@@ -446,8 +447,8 @@ export class VoiceTypeAnalysisService {
     if (validFrameCount === 0) {
       validFrameCount = 1; // ゼロ除算を防ぐ
       totalSpectralSlope = 0; // 中間的な値
-      totalHighFrequencyRatio = 0.2;
-      totalNonIntegerHarmonics = 0.3;
+      totalHighFrequencyRatio = 0;
+      totalNonIntegerHarmonics = 0;
     }
     
     // 平均値を計算
@@ -755,19 +756,30 @@ export class VoiceTypeAnalysisService {
     // 2. 第2音程の4kHz周辺の成分が強く、非整数次倍音が多い場合 → プル
     else if (lowVoiceRegister === 'modal') {
       // 3. 第2音程が中間または裏声の場合 → フリップ
-      if ((midVoiceRegister === 'falsetto' || avgParameters.highFrequencyRatio.mid < 0.4)) {
+      // if ((midVoiceRegister === 'falsetto' || avgParameters.highFrequencyRatio.mid < 0.4)) {
+      if (midVoiceRegister === 'falsetto') {
         finalVoiceType = 'flip';
         confidence = 0.8;
       }
       else if (midVoiceRegister === 'middle' || midVoiceRegister === 'modal') {
-        if (avgMidNonIntegerHarmonics > 0.4) {
+        if (avgMidNonIntegerHarmonics >= 0.3) {
           finalVoiceType = 'pull';
+          confidence = 0.8;
+        }
+        else if (avgParameters.highFrequencyRatio.mid < 0.4) {
+          finalVoiceType = 'flip';
           confidence = 0.8;
         }
         else {
           if (highVoiceRegister === 'modal' || highVoiceRegister === 'middle') {
-            finalVoiceType = 'mixed';
-            confidence = 0.8;
+            if (highPitchParams.nonIntegerHarmonics >= 0.3) {
+              finalVoiceType = 'pull';
+              confidence = 0.8;
+            }
+            else {
+              finalVoiceType = 'mixed';
+              confidence = 0.8;
+            }
           }
           // 5. 第3音程が中間または裏声の場合 → フリップ
           else if (highVoiceRegister === 'falsetto') {
@@ -859,9 +871,9 @@ export class VoiceTypeAnalysisService {
     // 基音周波数のインデックスを計算
     const baseIdx = Math.round((baseFrequency / sampleRate) * fftSize);
     
-    // 基音の振幅が0の場合は0を返す（ゼロ除算を防ぐ）
+    // 基音の振幅が0または非常に小さい場合は0を返す（ゼロ除算を防ぐ）
     const baseAmp = baseIdx < frequencyData.length ? frequencyData[baseIdx] : 0;
-    if (baseAmp === 0) {
+    if (baseAmp < 10) {
       return {
         spectralSlope: 0,
         bandPeakRatio: 0,
@@ -940,7 +952,7 @@ export class VoiceTypeAnalysisService {
       }
     }
     
-    const bandPeakRatio = (maxAmp / baseAmp) * 100;
+    const bandPeakRatio = Math.min(100, (maxAmp / baseAmp) * 100);
     
     // 2.5kHz～6kHzの周波数帯域の最大振幅を計算
     const highFreqStartIdx = Math.floor((2500 / sampleRate) * fftSize);
@@ -953,7 +965,7 @@ export class VoiceTypeAnalysisService {
       }
     }
     
-    const highFreqRatio = (highFreqMaxAmp / baseAmp) * 100;
+    const highFreqRatio = Math.min(100, (highFreqMaxAmp / baseAmp) * 100);
     
     console.log('Spectral Slope:', spectralSlope);
     return {

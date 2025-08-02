@@ -3,7 +3,7 @@
     <v-card v-if="analysisResult" class="mt-6">
       <v-card-title class="text-center text-h5">
         <v-icon start icon="mdi-account-voice" class="mr-2"></v-icon>
-        ボイスタイプ分析結果
+        ボイスタイプ分類結果
       </v-card-title>
       
       <v-card-text>
@@ -160,55 +160,6 @@
                     {{ Math.round((selectedPitchResult?.parameters.highFrequencyRatio || 0) * 100) }}%
                     <v-progress-linear
                       :model-value="(selectedPitchResult?.parameters.highFrequencyRatio || 0) * 100"
-                      color="primary"
-                      height="5"
-                      class="mt-1"
-                    ></v-progress-linear>
-                  </v-list-item-subtitle>
-                </v-list-item>
-
-                <!-- 新しいパラメータ（存在する場合のみ表示） -->
-                <v-list-item v-if="selectedPitchTab === 'overall' && analysisResult.parameters.voiceQualityChange !== undefined">
-                  <template v-slot:prepend>
-                    <v-icon>mdi-swap-vertical</v-icon>
-                  </template>
-                  <v-list-item-title>声質変化の度合い</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round(analysisResult.parameters.voiceQualityChange * 100) }}%
-                    <v-progress-linear
-                      :model-value="analysisResult.parameters.voiceQualityChange * 100"
-                      color="primary"
-                      height="5"
-                      class="mt-1"
-                    ></v-progress-linear>
-                  </v-list-item-subtitle>
-                </v-list-item>
-
-                <v-list-item v-if="selectedPitchTab === 'overall' && analysisResult.parameters.pitchAccuracy !== undefined">
-                  <template v-slot:prepend>
-                    <v-icon>mdi-music-accidental-sharp</v-icon>
-                  </template>
-                  <v-list-item-title>音程精度</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round(analysisResult.parameters.pitchAccuracy * 100) }}%
-                    <v-progress-linear
-                      :model-value="analysisResult.parameters.pitchAccuracy * 100"
-                      color="primary"
-                      height="5"
-                      class="mt-1"
-                    ></v-progress-linear>
-                  </v-list-item-subtitle>
-                </v-list-item>
-
-                <v-list-item v-if="selectedPitchTab === 'overall' && analysisResult.parameters.brightness3kHz !== undefined">
-                  <template v-slot:prepend>
-                    <v-icon>mdi-brightness-6</v-icon>
-                  </template>
-                  <v-list-item-title>3kHz周辺の強さ</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ Math.round(analysisResult.parameters.brightness3kHz * 100) }}%
-                    <v-progress-linear
-                      :model-value="analysisResult.parameters.brightness3kHz * 100"
                       color="primary"
                       height="5"
                       class="mt-1"

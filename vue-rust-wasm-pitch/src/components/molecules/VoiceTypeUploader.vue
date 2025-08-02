@@ -3,7 +3,7 @@
     <v-card class="mb-6">
       <v-card-title class="text-center text-h5">
         <v-icon start icon="mdi-account-voice" class="mr-2"></v-icon>
-        ボイスタイプ診断
+        ボイスタイプ分類
       </v-card-title>
       <v-card-subtitle class="text-center">
         指定された3つの音程で発声した音声をアップロードして分析します
@@ -26,7 +26,7 @@
         <v-card variant="outlined" class="mb-4 pa-4">
           <v-card-title class="text-subtitle-1">
             <v-icon start icon="mdi-music-note" class="mr-2"></v-icon>
-            診断用音程ガイド
+            分類用音程ガイド
           </v-card-title>
           <v-card-text>
             <p class="text-body-2 mb-4">
