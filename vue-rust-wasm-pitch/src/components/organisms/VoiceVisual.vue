@@ -56,7 +56,7 @@
     </v-window>
 
     <!-- タブに応じて適切なヒートマップコンポーネントを表示 -->
-    <v-card class="mb-6">
+    <v-card class="mb-6" v-if="activeTab != 'voicetype'">
       <v-card-title class="d-flex align-center justify-space-between">
         <div class="d-flex align-center">
           <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
@@ -81,7 +81,7 @@
         
         <!-- ファイル入力モードの場合 -->
         <FileHeatMapCanvas
-          v-else
+          v-if="activeTab === 'file'"
           ref="fileHeatMapCanvasRef"
           :frequencyData="frequencyData"
           :base-frequency="currentPitch"
@@ -92,7 +92,7 @@
       </v-card-text>
     </v-card>
 
-    <v-row>
+    <v-row v-if="activeTab != 'voicetype'">
       <v-col cols="12" md="6">
         <v-card height="100%">
           <v-card-title>
