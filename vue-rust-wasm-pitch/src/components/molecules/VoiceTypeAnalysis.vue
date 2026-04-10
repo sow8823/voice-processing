@@ -1,15 +1,15 @@
 <template>
   <div class="voice-type-analysis">
-    <!-- アップローダー部分 -->
+    <!-- ステップ1: 性別選択 & ファイルアップロード -->
     <v-card class="mb-6">
       <v-card-title class="text-center text-h5">
         <v-icon start icon="mdi-account-voice" class="mr-2"></v-icon>
         ボイスタイプ分類
       </v-card-title>
       <v-card-subtitle class="text-center">
-        指定された3つの音程で発声した音声をアップロードして分析します
+        3つの音程を続けて歌った1つの音声ファイルをアップロードし、ヒートマップ上で各音程の範囲を指定して分析します
       </v-card-subtitle>
-      
+
       <v-card-text>
         <!-- 性別選択 -->
         <v-card variant="outlined" class="mb-4 pa-4">
@@ -17,12 +17,12 @@
             <v-icon start icon="mdi-gender-male-female" class="mr-2"></v-icon>
             性別を選択
           </v-card-title>
-          <v-radio-group v-model="gender" inline>
+          <v-radio-group v-model="gender" inline @update:model-value="onGenderChange">
             <v-radio label="男性" value="male"></v-radio>
             <v-radio label="女性" value="female"></v-radio>
           </v-radio-group>
         </v-card>
-        
+
         <!-- 音程ガイド -->
         <v-card variant="outlined" class="mb-4 pa-4">
           <v-card-title class="text-subtitle-1">
@@ -30,15 +30,14 @@
             分類用音程ガイド
           </v-card-title>
           <v-card-text>
-            <p class="text-body-2 mb-4">
-              {{ gender === 'male' ? '男性' : '女性' }}用の3つの音程で発声した音声をそれぞれアップロードしてください。
+            <p class="text-body-2 mb-3">
+              以下の3つの音程を順番に歌った音声を1ファイルにまとめてアップロードしてください。
               参考音ボタンを押すと、その音程の音が再生されます。
             </p>
-            
-            <v-list>
+            <v-list density="compact">
               <v-list-item v-for="(pitch, index) in pitchSet" :key="index">
                 <template v-slot:prepend>
-                  <v-icon icon="mdi-music-note"></v-icon>
+                  <v-chip size="small" :color="segmentColors[index]" class="mr-2">{{ index + 1 }}</v-chip>
                 </template>
                 <v-list-item-title>{{ pitch.name }} ({{ pitch.frequency }} Hz)</v-list-item-title>
                 <template v-slot:append>
@@ -55,94 +54,137 @@
             </v-list>
           </v-card-text>
         </v-card>
-        
-        <!-- 音声アップロードセクション -->
-        <v-card v-for="(pitch, index) in pitchSet" :key="index" variant="outlined" class="mb-4 pa-4">
+
+        <!-- ファイルアップロード -->
+        <v-card variant="outlined" class="mb-4 pa-4">
           <v-card-title class="text-subtitle-1">
             <v-icon start icon="mdi-file-upload" class="mr-2"></v-icon>
-            {{ pitch.name }} の音声をアップロード
+            音声ファイルをアップロード
           </v-card-title>
-          
+
           <v-file-input
-            v-model="audioFiles[pitch.id]"
-            accept="audio/mp3,audio/wav"
-            :label="`${pitch.name} の音声ファイルを選択`"
+            v-model="audioFile"
+            accept="audio/mp3,audio/wav,audio/mpeg"
+            label="3つの音程を歌った音声ファイルを選択"
             prepend-icon="mdi-music"
             show-size
             :rules="[rules.fileType]"
-            @update:model-value="(file) => handleFileChange(file as File | null, pitch.id)"
+            @update:model-value="(f) => handleFileChange(Array.isArray(f) ? f[0] ?? null : f)"
             class="mb-2"
           ></v-file-input>
-          
-          <div v-if="audioUrls[pitch.id]" class="audio-player-container">
+
+          <div v-if="audioUrl" class="audio-player-container">
             <div class="d-flex align-center mb-2">
               <v-icon icon="mdi-music-note" class="mr-2"></v-icon>
-              <span class="text-subtitle-2">{{ audioFiles[pitch.id]?.name }}</span>
+              <span class="text-subtitle-2">{{ audioFile?.name }}</span>
             </div>
-            
             <audio
-              :ref="el => setAudioPlayerRef(el as HTMLAudioElement | null, pitch.id)"
+              ref="audioPlayerRef"
               class="w-100"
-              :src="audioUrls[pitch.id] || undefined"
+              :src="audioUrl"
               controls
-              @loadedmetadata="(event) => handleAudioLoaded(event, pitch.id)"
+              @loadedmetadata="handleAudioLoaded"
             ></audio>
-            
             <div class="d-flex justify-end mt-2">
               <v-btn
                 color="error"
                 variant="outlined"
                 size="small"
                 prepend-icon="mdi-delete"
-                @click="() => clearAudio(pitch.id)"
-                :disabled="isPlaying[pitch.id]"
+                @click="clearAudio"
               >
                 クリア
               </v-btn>
             </div>
           </div>
         </v-card>
-        
-        <!-- 分析ボタン -->
-        <div class="d-flex justify-center mt-6">
-          <v-btn
-            color="primary"
-            size="large"
-            prepend-icon="mdi-waveform"
-            @click="analyzeAudio"
-            :disabled="!allPitchesUploaded || isAnalyzing"
-            :loading="isAnalyzing"
-            class="px-8"
-          >
-            ボイスタイプを分析
-          </v-btn>
-        </div>
       </v-card-text>
     </v-card>
-    
+
+    <!-- ステップ2: ヒートマップ表示 & 時間範囲指定 -->
+    <v-card v-if="isAnalyzingFile || analysisData.timestamps.length > 0" class="mb-6">
+      <v-card-title class="d-flex align-center">
+        <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
+        周波数ヒートマップ
+        <v-spacer />
+        <v-card class="legend-card">
+          <div class="legend-gradient"></div>
+          <div class="d-flex justify-space-between">
+            <span class="text-caption text-white">低</span>
+            <span class="text-caption text-white">高</span>
+          </div>
+        </v-card>
+      </v-card-title>
+
+      <v-card-text>
+        <div v-if="isAnalyzingFile" class="d-flex justify-center align-center py-8">
+          <v-progress-circular indeterminate color="primary" size="48" class="mr-4"></v-progress-circular>
+          <span>ファイルを分析中...</span>
+        </div>
+
+        <VoiceTypeHeatMapCanvas
+          v-else-if="analysisData.timestamps.length > 0"
+          ref="heatMapCanvasRef"
+          :analysis-data="analysisData"
+          :duration="audioDuration"
+          :pitch-labels="pitchLabels"
+          @segments-updated="handleSegmentsUpdated"
+        />
+      </v-card-text>
+    </v-card>
+
+    <!-- ステップ3: 分析ボタン -->
+    <div v-if="analysisData.timestamps.length > 0" class="d-flex justify-center gap-3 mb-6">
+      <v-btn
+        color="secondary"
+        variant="outlined"
+        prepend-icon="mdi-refresh"
+        @click="resetSegments"
+        :disabled="isAnalyzing"
+      >
+        範囲をリセット
+      </v-btn>
+      <v-btn
+        color="primary"
+        size="large"
+        prepend-icon="mdi-waveform"
+        @click="analyzeAudio"
+        :disabled="!allSegmentsSet || isAnalyzing"
+        :loading="isAnalyzing"
+        class="px-8"
+      >
+        ボイスタイプを分析
+      </v-btn>
+    </div>
+
+    <!-- 未設定セグメントの警告 -->
+    <v-alert
+      v-if="analysisData.timestamps.length > 0 && !allSegmentsSet && !isAnalyzing"
+      type="info"
+      variant="tonal"
+      class="mb-4"
+    >
+      ヒートマップ上で3つの音程（低音・中音・高音）の時間範囲をすべて指定してください。
+    </v-alert>
+
     <!-- 分析結果表示 -->
-    <VoiceTypeResult 
-      v-if="analysisResult" 
-      :analysis-result="analysisResult" 
-      :selected-note="selectedNote"
+    <VoiceTypeResult
+      v-if="analysisResult"
+      :analysis-result="analysisResult"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted, onMounted, watch } from 'vue';
+import { ref, computed, onUnmounted, watch } from 'vue';
 import VoiceTypeResult from './VoiceTypeResult.vue';
+import VoiceTypeHeatMapCanvas from '../atoms/VoiceTypeHeatMapCanvas.vue';
+import type { TimeSegment } from '../atoms/VoiceTypeHeatMapCanvas.vue';
 import type { VoiceTypeAnalysisResult } from '../../services/VoiceTypeAnalysisService';
 
 // イベント
 const emit = defineEmits<{
-  (e: 'audio-loaded', audioBuffers: Record<string, AudioBuffer>): void;
-  (e: 'analysis-requested', audioBuffers: Record<string, AudioBuffer>, gender: string): void;
-  (e: 'playback-started', pitchId: string, currentTime: number): void;
-  (e: 'playback-ended', pitchId: string): void;
-  (e: 'playback-stopped', pitchId: string): void;
-  (e: 'playback-time-updated', currentTime: number): void;
-  (e: 'seek-to-time', seekTime: number): void;
+  (e: 'analysis-requested', audioBuffer: AudioBuffer, gender: string, segments: TimeSegment[]): void;
 }>();
 
 // 親コンポーネントからのプロップス
@@ -151,13 +193,15 @@ const props = defineProps<{
   analysisResult?: VoiceTypeAnalysisResult | null;
 }>();
 
+// セグメントカラー（ヒートマップと同じ色）
+const segmentColors = ['light-blue', 'green', 'orange'];
+
 // リアクティブな状態
 const gender = ref<'male' | 'female'>('male');
 const audioContext = ref<AudioContext | null>(null);
 const isAnalyzing = ref<boolean>(false);
-const isAnalyzed = ref<boolean>(false);
+const isAnalyzingFile = ref<boolean>(false);
 const oscillator = ref<OscillatorNode | null>(null);
-const selectedNote = ref<string>('A4');
 
 // 音程セット
 const pitchSet = computed(() => {
@@ -176,16 +220,45 @@ const pitchSet = computed(() => {
   }
 });
 
-// 音声ファイル関連の状態
-const audioFiles = ref<Record<string, File | null>>({});
-const audioUrls = ref<Record<string, string | null>>({});
-const audioPlayers = ref<Record<string, HTMLAudioElement | null>>({});
-const audioBuffers = ref<Record<string, AudioBuffer | null>>({});
-const isPlaying = ref<Record<string, boolean>>({});
+// ヒートマップ用ピッチラベル
+const pitchLabels = computed(() => {
+  const ps = pitchSet.value;
+  return {
+    low: ps[0].name,
+    mid: ps[1].name,
+    high: ps[2].name,
+  };
+});
 
-// すべての音程がアップロードされているかどうか
-const allPitchesUploaded = computed(() => {
-  return pitchSet.value.every(pitch => !!audioBuffers.value[pitch.id]);
+// 音声ファイル関連の状態
+const audioFile = ref<File | null>(null);
+const audioUrl = ref<string | null>(null);
+const audioBuffer = ref<AudioBuffer | null>(null);
+const audioPlayerRef = ref<HTMLAudioElement | null>(null);
+const audioDuration = ref<number | undefined>(undefined);
+
+// 分析データ
+const analysisData = ref<{
+  frequencyData: Uint8Array[];
+  timestamps: number[];
+}>({
+  frequencyData: [],
+  timestamps: [],
+});
+
+// 時間セグメント
+const timeSegments = ref<TimeSegment[]>([]);
+
+// ヒートマップキャンバスの参照
+const heatMapCanvasRef = ref<InstanceType<typeof VoiceTypeHeatMapCanvas> | null>(null);
+
+// 分析結果（ローカル）
+const analysisResult = ref<VoiceTypeAnalysisResult | null>(null);
+
+// すべてのセグメントが設定されているか
+const allSegmentsSet = computed(() => {
+  return timeSegments.value.length === 3 &&
+    timeSegments.value.every(s => s.start !== null && s.end !== null && s.end > s.start);
 });
 
 // バリデーションルール
@@ -197,11 +270,6 @@ const rules = {
   }
 };
 
-// 性別が変更されたときに音声ファイルをクリア
-watch(gender, () => {
-  clearAllAudio();
-});
-
 // AudioContextの初期化
 const initAudioContext = () => {
   if (!audioContext.value) {
@@ -212,32 +280,22 @@ const initAudioContext = () => {
 
 // 参考音を再生する関数
 const playReferenceTone = (frequency: number) => {
-  // 既存のオシレーターを停止
   if (oscillator.value) {
     oscillator.value.stop();
     oscillator.value.disconnect();
     oscillator.value = null;
   }
-  
   const context = initAudioContext();
-  
-  // オシレーターを作成
   oscillator.value = context.createOscillator();
   oscillator.value.type = 'sine';
   oscillator.value.frequency.setValueAtTime(frequency, context.currentTime);
-  
-  // ゲインノードを作成（音量調整用）
   const gainNode = context.createGain();
   gainNode.gain.setValueAtTime(0, context.currentTime);
   gainNode.gain.linearRampToValueAtTime(0.5, context.currentTime + 0.1);
   gainNode.gain.linearRampToValueAtTime(0, context.currentTime + 1.5);
-  
-  // 接続して再生
   oscillator.value.connect(gainNode);
   gainNode.connect(context.destination);
   oscillator.value.start();
-  
-  // 1.5秒後に停止
   setTimeout(() => {
     if (oscillator.value) {
       oscillator.value.stop();
@@ -247,71 +305,120 @@ const playReferenceTone = (frequency: number) => {
   }, 1500);
 };
 
-// オーディオプレーヤーの参照を設定
-const setAudioPlayerRef = (el: HTMLAudioElement | null, pitchId: string) => {
-  audioPlayers.value[pitchId] = el;
+// 性別変更時の処理
+const onGenderChange = () => {
+  // セグメントのラベルはpitchLabelsのcomputedで自動更新される
+  // セグメントの範囲はリセットしない（ファイルは同じなので）
 };
 
 // ファイル選択時の処理
-const handleFileChange = async (file: File | null, pitchId: string) => {
-  // 以前のURLをクリア
-  if (audioUrls.value[pitchId]) {
-    URL.revokeObjectURL(audioUrls.value[pitchId]!);
+const handleFileChange = async (file: File | null) => {
+  if (audioUrl.value) {
+    URL.revokeObjectURL(audioUrl.value);
+    audioUrl.value = null;
   }
-  
+  audioBuffer.value = null;
+  audioDuration.value = undefined;
+  analysisData.value = { frequencyData: [], timestamps: [] };
+  timeSegments.value = [];
+  analysisResult.value = null;
+
   if (file) {
-    audioFiles.value[pitchId] = file;
-    audioUrls.value[pitchId] = URL.createObjectURL(file);
-    audioBuffers.value[pitchId] = null; // 新しいファイルがアップロードされたらバッファをリセット
-    isPlaying.value[pitchId] = false;
+    audioFile.value = file;
+    audioUrl.value = URL.createObjectURL(file);
   } else {
-    clearAudio(pitchId);
+    audioFile.value = null;
   }
 };
 
 // 音声ファイルが読み込まれたときの処理
-const handleAudioLoaded = async (event: Event, pitchId: string) => {
-  const file = audioFiles.value[pitchId];
+const handleAudioLoaded = async () => {
+  const file = audioFile.value;
   if (!file) return;
-  
+
   try {
+    isAnalyzingFile.value = true;
     const context = initAudioContext();
-    
-    // ファイルを読み込む
-    const arrayBuffer = await file.arrayBuffer();
-    
+
     // AudioBufferに変換
+    const arrayBuffer = await file.arrayBuffer();
     const buffer = await context.decodeAudioData(arrayBuffer);
-    audioBuffers.value[pitchId] = buffer;
-    
-    console.log(`${pitchId} の音声ファイルを読み込みました`);
-    
-    // すべての音程がアップロードされたかチェック
-    if (allPitchesUploaded.value) {
-      // イベントを発火
-      emit('audio-loaded', { ...audioBuffers.value } as Record<string, AudioBuffer>);
-    }
+    audioBuffer.value = buffer;
+    audioDuration.value = buffer.duration;
+
+    console.log(`音声ファイルを読み込みました: ${buffer.duration.toFixed(2)}秒`);
+
+    // ファイルの周波数分析を実行（ヒートマップ表示用）
+    await analyzeFileForHeatmap(buffer);
   } catch (error) {
     console.error('音声ファイルの読み込みに失敗しました:', error);
     alert('音声ファイルの読み込みに失敗しました。別のファイルを試してください。');
+  } finally {
+    isAnalyzingFile.value = false;
   }
+};
+
+// ヒートマップ表示用のファイル分析
+const analyzeFileForHeatmap = async (buffer: AudioBuffer) => {
+  const { frequencyAnalysisServiceWebAudio } = await import('../../services/FrequencyAnalysisServiceWebAudio');
+
+  await frequencyAnalysisServiceWebAudio.initialize(16384);
+
+  const bufferSize = 8192;
+  const hopSize = 512;
+
+  const { frequencyDataArray, timestamps } = await frequencyAnalysisServiceWebAudio.analyzeAudioBufferBatch(
+    buffer,
+    bufferSize,
+    hopSize
+  );
+
+  analysisData.value = {
+    frequencyData: frequencyDataArray,
+    timestamps,
+  };
+
+  console.log(`ヒートマップ用分析完了: ${frequencyDataArray.length}フレーム`);
+};
+
+// セグメント更新ハンドラ
+const handleSegmentsUpdated = (segments: TimeSegment[]) => {
+  timeSegments.value = segments;
+};
+
+// セグメントリセット
+const resetSegments = () => {
+  heatMapCanvasRef.value?.resetSegments();
+  timeSegments.value = [];
+};
+
+// 音声をクリア
+const clearAudio = () => {
+  if (audioUrl.value) {
+    URL.revokeObjectURL(audioUrl.value);
+  }
+  audioFile.value = null;
+  audioUrl.value = null;
+  audioBuffer.value = null;
+  audioDuration.value = undefined;
+  analysisData.value = { frequencyData: [], timestamps: [] };
+  timeSegments.value = [];
+  analysisResult.value = null;
 };
 
 // 分析ボタンのクリックハンドラ
 const analyzeAudio = async () => {
-  if (!allPitchesUploaded.value) return;
-  
+  if (!allSegmentsSet.value || !audioBuffer.value) return;
+
   isAnalyzing.value = true;
-  isAnalyzed.value = false; // 分析開始時にリセット
-  
+  analysisResult.value = null;
+
   try {
-    console.log('音声ファイルの分析を開始します');
-    console.log(`選択された性別: ${gender.value}`);
-    
-    // 分析リクエストを発火
-    emit('analysis-requested', { ...audioBuffers.value } as Record<string, AudioBuffer>, gender.value);
-    
-    // 注意: 分析完了フラグは親コンポーネントから通知される
+    console.log('ボイスタイプ分析を開始します');
+    console.log(`性別: ${gender.value}`);
+    console.log('セグメント:', timeSegments.value);
+
+    emit('analysis-requested', audioBuffer.value, gender.value, timeSegments.value);
   } catch (error) {
     console.error('音声分析に失敗しました:', error);
     alert('音声分析に失敗しました。');
@@ -322,92 +429,27 @@ const analyzeAudio = async () => {
 // 親コンポーネントからの分析完了通知を監視
 watch(() => props.analysisCompleted, (completed) => {
   if (completed) {
-    console.log('分析が完了しました');
-    isAnalyzed.value = true;
     isAnalyzing.value = false;
   }
 });
 
-// 特定の音程の音声をクリア
-const clearAudio = (pitchId: string) => {
-  if (audioUrls.value[pitchId]) {
-    URL.revokeObjectURL(audioUrls.value[pitchId]!);
+// 親コンポーネントからの分析結果を監視
+watch(() => props.analysisResult, (result) => {
+  if (result) {
+    analysisResult.value = result;
   }
-  
-  audioFiles.value[pitchId] = null;
-  audioUrls.value[pitchId] = null;
-  audioBuffers.value[pitchId] = null;
-  isPlaying.value[pitchId] = false;
-  
-  if (audioPlayers.value[pitchId]) {
-    audioPlayers.value[pitchId]!.pause();
-    audioPlayers.value[pitchId]!.currentTime = 0;
-  }
-  
-  console.log(`${pitchId} の音声ファイルをクリアしました`);
-};
-
-// すべての音声をクリア
-const clearAllAudio = () => {
-  // 現在のpitchSetに基づいてクリア
-  pitchSet.value.forEach(pitch => {
-    clearAudio(pitch.id);
-  });
-  
-  isAnalyzed.value = false;
-  console.log('すべての音声ファイルをクリアしました');
-};
-
-// 音声再生が開始されたときの処理
-const handlePlaybackStarted = (pitchId: string, currentTime: number) => {
-  isPlaying.value[pitchId] = true;
-  emit('playback-started', pitchId, currentTime);
-};
-
-// 音声再生が終了したときの処理
-const handlePlaybackEnded = (pitchId: string) => {
-  isPlaying.value[pitchId] = false;
-  emit('playback-ended', pitchId);
-};
-
-// コンポーネントがマウントされたときの処理
-onMounted(() => {
-  // 音声プレーヤーのイベントリスナーを設定
-  Object.keys(audioPlayers.value).forEach(pitchId => {
-    const player = audioPlayers.value[pitchId];
-    if (player) {
-      player.addEventListener('play', () => handlePlaybackStarted(pitchId, player.currentTime));
-      player.addEventListener('ended', () => handlePlaybackEnded(pitchId));
-    }
-  });
 });
 
 // コンポーネントがアンマウントされたときのクリーンアップ
 onUnmounted(() => {
-  // URLをクリア
-  Object.values(audioUrls.value).forEach(url => {
-    if (url) URL.revokeObjectURL(url);
-  });
-  
-  // オシレーターを停止
+  if (audioUrl.value) URL.revokeObjectURL(audioUrl.value);
   if (oscillator.value) {
     oscillator.value.stop();
     oscillator.value.disconnect();
   }
-  
-  // AudioContextを閉じる
   if (audioContext.value && audioContext.value.state !== 'closed') {
     audioContext.value.close();
   }
-  
-  // 音声プレーヤーのイベントリスナーを削除
-  Object.keys(audioPlayers.value).forEach(pitchId => {
-    const player = audioPlayers.value[pitchId];
-    if (player) {
-      player.removeEventListener('play', () => handlePlaybackStarted(pitchId, player.currentTime));
-      player.removeEventListener('ended', () => handlePlaybackEnded(pitchId));
-    }
-  });
 });
 </script>
 
@@ -423,5 +465,25 @@ onUnmounted(() => {
 audio {
   width: 100%;
   margin: 8px 0;
+}
+
+.gap-3 {
+  gap: 12px;
+}
+
+.legend-card {
+  background: transparent;
+  width: 100px;
+  padding: 4px;
+  border-radius: 4px;
+  margin-left: 16px;
+}
+
+.legend-gradient {
+  height: 10px;
+  width: 100%;
+  background: linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000);
+  border-radius: 2px;
+  margin-bottom: 2px;
 }
 </style>

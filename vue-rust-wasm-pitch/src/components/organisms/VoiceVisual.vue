@@ -46,13 +46,7 @@
       <!-- ボイスタイプ分析タブ -->
       <v-window-item value="voicetype">
         <VoiceTypeAnalysis
-          @audio-loaded="handleMultipleAudioFilesLoaded"
-          @analysis-requested="analyzeMultipleAudioFiles"
-          @playback-started="handlePitchPlaybackStarted"
-          @playback-time-updated="handlePlaybackTimeUpdated"
-          @playback-ended="handlePlaybackEnded"
-          @playback-stopped="handlePlaybackStopped"
-          @seek-to-time="handleSeekToTime"
+          @analysis-requested="analyzeVoiceTypeFromSegments"
           :analysis-completed="analysisCompleted"
           :analysis-result="voiceTypeAnalysisResult"
         />
@@ -292,10 +286,6 @@ const handlePlaybackStarted = (currentTime: number) => {
   updateDisplayForPlayback(currentTime);
 };
 
-const handlePitchPlaybackStarted = (pitchId: string, currentTime: number) => {
-  console.log(`${pitchId}の再生開始:`, currentTime);
-};
-
 const handlePlaybackTimeUpdated = (currentTime: number) => {
   currentPlaybackTime.value = currentTime;
   updateDisplayForPlayback(currentTime);
@@ -350,77 +340,108 @@ const updateDisplayForPlayback = (time: number) => {
   }
 };
 
-// ボイスタイプ分析関連のハンドラ
-const handleMultipleAudioFilesLoaded = (audioBuffers: Record<string, AudioBuffer>) => {
-  console.log('複数の音声ファイルが読み込まれました:', Object.keys(audioBuffers));
-};
-
-const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffer>, gender: string) => {
+// ボイスタイプ分析関連のハンドラ（1ファイル + セグメント指定方式）
+const analyzeVoiceTypeFromSegments = async (
+  audioBuffer: AudioBuffer,
+  gender: string,
+  segments: Array<{ id: 'low' | 'mid' | 'high'; start: number | null; end: number | null }>
+) => {
   try {
     analysisCompleted.value = false;
-    
-    console.log('複数の音声ファイルの分析を開始します');
+    voiceTypeAnalysisResult.value = null;
+
+    console.log('ボイスタイプ分析を開始します（セグメント指定方式）');
     console.log(`性別: ${gender}`);
-    
-    // ピッチ検出サービスを初期化
-    await pitchDetectionService.initialize();
-    
+    console.log('セグメント:', segments);
+
     // 周波数分析サービスを初期化
-    await frequencyAnalysisServiceWebAudio.initialize(16384); // fftSizeを16384に設定
-    
+    await frequencyAnalysisServiceWebAudio.initialize(16384);
+
     // ボイスタイプ分析サービスのインスタンスを作成
     const voiceTypeAnalysisService = new VoiceTypeAnalysisService();
-    
-    // 各音程ごとの分析データを保存するオブジェクト
+
+    const bufferSize = 8192;
+    const hopSize = 512;
+    const sampleRate = audioBuffer.sampleRate;
+
+    // 各セグメントの周波数データを抽出する
     const pitchFrequencyDataArrays: Record<string, Uint8Array[]> = {};
-    
-    // 各音程ごとに分析
-    for (const [pitchId, buffer] of Object.entries(audioBuffers)) {
-      console.log(`${pitchId}の分析を開始します`);
-      
-      const bufferSize = 8192;
-      const hopSize = 512;
-      const numFrames = Math.floor((buffer.length - bufferSize) / hopSize) + 1;
-      
-      // 分析用の一時バッファ
-      const tempBuffer = new Float32Array(bufferSize);
-      
-      // バッチ処理で周波数データを取得
+
+    for (const seg of segments) {
+      if (seg.start === null || seg.end === null) continue;
+
+      const startSample = Math.floor(seg.start * sampleRate);
+      const endSample = Math.floor(seg.end * sampleRate);
+      const segmentLength = endSample - startSample;
+
+      if (segmentLength <= 0) continue;
+
+      console.log(`セグメント ${seg.id}: ${seg.start.toFixed(2)}s - ${seg.end.toFixed(2)}s (${segmentLength}サンプル)`);
+
+      // セグメント分のオフラインAudioBufferを作成
+      const offlineCtx = new OfflineAudioContext(
+        audioBuffer.numberOfChannels,
+        segmentLength,
+        sampleRate
+      );
+
+      const segBuffer = offlineCtx.createBuffer(
+        audioBuffer.numberOfChannels,
+        segmentLength,
+        sampleRate
+      );
+
+      // 各チャンネルのデータをコピー
+      for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+        const srcData = audioBuffer.getChannelData(ch);
+        const dstData = segBuffer.getChannelData(ch);
+        for (let i = 0; i < segmentLength; i++) {
+          dstData[i] = srcData[startSample + i] ?? 0;
+        }
+      }
+
+      // セグメントバッファを周波数分析
       const { frequencyDataArray } = await frequencyAnalysisServiceWebAudio.analyzeAudioBufferBatch(
-        buffer,
+        segBuffer,
         bufferSize,
         hopSize
       );
-      
-      // 各フレームを分析
-      for (let i = 0; i < numFrames && i < frequencyDataArray.length; i++) {
-        const startSample = i * hopSize;
-        buffer.copyFromChannel(tempBuffer, 0, startSample);
-      }
-      
-      // 音程ごとの結果を保存
-      pitchFrequencyDataArrays[pitchId] = frequencyDataArray;
-      
-      console.log(`${pitchId}の分析完了: ${frequencyDataArray.length}フレーム`);
+
+      pitchFrequencyDataArrays[seg.id] = frequencyDataArray;
+      console.log(`セグメント ${seg.id} 分析完了: ${frequencyDataArray.length}フレーム`);
     }
-    
+
+    // pitchIdをgenderに対応したキーにマッピング
+    // analyzeMultiplePitchesはgenderPitchSetsのidを使うため、
+    // セグメントid（low/mid/high）をgenderに対応したpitchIdに変換する
+    const genderPitchIds: Record<string, string[]> = {
+      male: ['e3', 'e4', 'a4'],
+      female: ['a3', 'a4', 'e5'],
+    };
+    const pitchIds = genderPitchIds[gender] ?? genderPitchIds['male'];
+    const segmentOrder: Array<'low' | 'mid' | 'high'> = ['low', 'mid', 'high'];
+
+    const mappedFreqDataArrays: Record<string, Uint8Array[]> = {};
+    segmentOrder.forEach((segId, idx) => {
+      if (pitchFrequencyDataArrays[segId]) {
+        mappedFreqDataArrays[pitchIds[idx]] = pitchFrequencyDataArrays[segId];
+      }
+    });
+
     // ボイスタイプを分析
     const result = voiceTypeAnalysisService.analyzeMultiplePitches(
-      pitchFrequencyDataArrays,
-      // pitchDataArrays,
-      // timestampsArrays,
-      audioBuffers[Object.keys(audioBuffers)[0]].sampleRate,
+      mappedFreqDataArrays,
+      sampleRate,
       gender as 'male' | 'female'
     );
-    
-    // 結果を保存
+
     voiceTypeAnalysisResult.value = result;
-    
     console.log('ボイスタイプ分析結果:', result);
     analysisCompleted.value = true;
   } catch (error) {
     console.error('ボイスタイプ分析に失敗しました:', error);
     alert('ボイスタイプ分析に失敗しました。');
+    analysisCompleted.value = false;
   }
 };
 

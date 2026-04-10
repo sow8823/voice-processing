@@ -66,8 +66,8 @@ export class AudioService {
    */
   getTimeDomainData(buffer: Float32Array): void {
     if (this.analyser) {
-      // @ts-expect-error - TypeScriptの型の互換性エラー（ArrayBufferLikeとArrayBufferの互換性）
-      this.analyser.getFloatTimeDomainData(buffer);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.analyser.getFloatTimeDomainData(buffer as any);
     }
   }
 
@@ -77,8 +77,8 @@ export class AudioService {
    */
   getFrequencyData(buffer: Uint8Array): void {
     if (this.analyser) {
-      // @ts-expect-error - TypeScriptの型の互換性エラー（ArrayBufferLikeとArrayBufferの互換性）
-      this.analyser.getByteFrequencyData(buffer);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.analyser.getByteFrequencyData(buffer as any);
     }
   }
 
