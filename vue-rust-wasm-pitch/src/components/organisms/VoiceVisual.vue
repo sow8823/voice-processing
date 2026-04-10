@@ -13,6 +13,10 @@
         <v-icon start>mdi-account-voice</v-icon>
         ボイスタイプ分類
       </v-tab>
+      <v-tab value="compare">
+        <v-icon start>mdi-compare</v-icon>
+        ファイル比較
+      </v-tab>
     </v-tabs>
 
     <v-window v-model="activeTab">
@@ -53,10 +57,15 @@
           :analysis-result="voiceTypeAnalysisResult"
         />
       </v-window-item>
+
+      <!-- ファイル比較タブ -->
+      <v-window-item value="compare">
+        <FileCompareView />
+      </v-window-item>
     </v-window>
 
     <!-- タブに応じて適切なヒートマップコンポーネントを表示 -->
-    <v-card class="mb-6" v-if="activeTab != 'voicetype'">
+    <v-card class="mb-6" v-if="activeTab !== 'voicetype' && activeTab !== 'compare'">
       <v-card-title class="d-flex align-center justify-space-between">
         <div class="d-flex align-center">
           <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
@@ -92,7 +101,7 @@
       </v-card-text>
     </v-card>
 
-    <v-row v-if="activeTab != 'voicetype'">
+    <v-row v-if="activeTab !== 'voicetype' && activeTab !== 'compare'">
       <v-col cols="12" md="6">
         <v-card height="100%">
           <v-card-title>
@@ -138,13 +147,13 @@ import FileHeatMapCanvas from "../atoms/FileHeatMapCanvas.vue";
 import AudioFileUploader from "../molecules/AudioFileUploader.vue";
 import MicrophoneInput from "../molecules/MicrophoneInput.vue";
 import VoiceTypeAnalysis from "../molecules/VoiceTypeAnalysis.vue";
+import FileCompareView from "./FileCompareView.vue";
 import type { VoiceTypeAnalysisResult } from "../../services/VoiceTypeAnalysisService";
 
 const activeTab = ref<string>("microphone");
 const currentPitch = ref<number>(0);
 const frequencyData = ref<Uint8Array>(new Uint8Array(1024));
 const isProcessing = ref<boolean>(false);
-const isLoading = ref<boolean>(false);
 const fileAudioBuffer = ref<AudioBuffer | null>(null);
 const realtimeHeatMapCanvasRef = ref<InstanceType<typeof RealtimeHeatMapCanvas> | null>(null);
 const fileHeatMapCanvasRef = ref<InstanceType<typeof FileHeatMapCanvas> | null>(null);
@@ -238,7 +247,6 @@ const analyzeAudioFile = async (buffer: AudioBuffer) => {
     const sampleRate = buffer.sampleRate;
     const bufferSize = 8192; // bufferSizeを8192に設定
     const hopSize = 256; // hopSizeを256に設定
-    const duration = buffer.duration;
     const numFrames = Math.floor((buffer.length - bufferSize) / hopSize) + 1;
     
     // 分析用の一時バッファ
@@ -365,15 +373,12 @@ const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffe
     
     // 各音程ごとの分析データを保存するオブジェクト
     const pitchFrequencyDataArrays: Record<string, Uint8Array[]> = {};
-    const pitchDataArrays: Record<string, number[]> = {};
-    const timestampsArrays: Record<string, number[]> = {};
     
     // 各音程ごとに分析
     for (const [pitchId, buffer] of Object.entries(audioBuffers)) {
       console.log(`${pitchId}の分析を開始します`);
       
-      const sampleRate = buffer.sampleRate;
-      const bufferSize = 8192; // bufferSizeを8192に設定
+      const bufferSize = 8192;
       const hopSize = 512;
       const numFrames = Math.floor((buffer.length - bufferSize) / hopSize) + 1;
       
@@ -381,34 +386,20 @@ const analyzeMultipleAudioFiles = async (audioBuffers: Record<string, AudioBuffe
       const tempBuffer = new Float32Array(bufferSize);
       
       // バッチ処理で周波数データを取得
-      const { frequencyDataArray, timestamps } = await frequencyAnalysisServiceWebAudio.analyzeAudioBufferBatch(
+      const { frequencyDataArray } = await frequencyAnalysisServiceWebAudio.analyzeAudioBufferBatch(
         buffer,
         bufferSize,
         hopSize
       );
       
-      // 結果を保存する配列
-      // const pitchData: number[] = [];
-      
       // 各フレームを分析
       for (let i = 0; i < numFrames && i < frequencyDataArray.length; i++) {
-        // フレームの開始位置
         const startSample = i * hopSize;
-        
-        // バッファにフレームのデータをコピー
         buffer.copyFromChannel(tempBuffer, 0, startSample);
-        
-        // // ピッチを検出
-        // const pitch = pitchDetectionService.detectPitch(tempBuffer, sampleRate);
-        
-        // // 結果を保存
-        // pitchData.push(pitch);
       }
       
       // 音程ごとの結果を保存
       pitchFrequencyDataArrays[pitchId] = frequencyDataArray;
-      // pitchDataArrays[pitchId] = pitchData;
-      // timestampsArrays[pitchId] = timestamps;
       
       console.log(`${pitchId}の分析完了: ${frequencyDataArray.length}フレーム`);
     }
