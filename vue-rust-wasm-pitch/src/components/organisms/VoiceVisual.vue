@@ -13,6 +13,10 @@
         <v-icon start>mdi-account-voice</v-icon>
         ボイスタイプ分類
       </v-tab>
+      <v-tab value="voicetype-record">
+        <v-icon start>mdi-microphone-plus</v-icon>
+        ボイスタイプ分類（録音）
+      </v-tab>
       <v-tab value="compare">
         <v-icon start>mdi-compare</v-icon>
         ファイル比較
@@ -52,6 +56,15 @@
         />
       </v-window-item>
 
+      <!-- ボイスタイプ分析（録音）タブ -->
+      <v-window-item value="voicetype-record">
+        <VoiceTypeRecorder
+          @analysis-requested="analyzeVoiceTypeFromSegments"
+          :analysis-completed="analysisCompleted"
+          :analysis-result="voiceTypeAnalysisResult"
+        />
+      </v-window-item>
+
       <!-- ファイル比較タブ -->
       <v-window-item value="compare">
         <FileCompareView />
@@ -59,7 +72,7 @@
     </v-window>
 
     <!-- タブに応じて適切なヒートマップコンポーネントを表示 -->
-    <v-card class="mb-6" v-if="activeTab !== 'voicetype' && activeTab !== 'compare'">
+    <v-card class="mb-6" v-if="activeTab !== 'voicetype' && activeTab !== 'voicetype-record' && activeTab !== 'compare'">
       <v-card-title class="d-flex align-center justify-space-between">
         <div class="d-flex align-center">
           <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
@@ -95,7 +108,7 @@
       </v-card-text>
     </v-card>
 
-    <v-row v-if="activeTab !== 'voicetype' && activeTab !== 'compare'">
+    <v-row v-if="activeTab !== 'voicetype' && activeTab !== 'voicetype-record' && activeTab !== 'compare'">
       <v-col cols="12" md="6">
         <v-card height="100%">
           <v-card-title>
@@ -141,6 +154,7 @@ import FileHeatMapCanvas from "../atoms/FileHeatMapCanvas.vue";
 import AudioFileUploader from "../molecules/AudioFileUploader.vue";
 import MicrophoneInput from "../molecules/MicrophoneInput.vue";
 import VoiceTypeAnalysis from "../molecules/VoiceTypeAnalysis.vue";
+import VoiceTypeRecorder from "../molecules/VoiceTypeRecorder.vue";
 import FileCompareView from "./FileCompareView.vue";
 import type { VoiceTypeAnalysisResult } from "../../services/VoiceTypeAnalysisService";
 

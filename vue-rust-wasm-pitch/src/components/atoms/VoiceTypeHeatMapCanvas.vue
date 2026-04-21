@@ -384,18 +384,18 @@ const drawHeatmap = () => {
 
     // 半透明の塗りつぶし
     ctx.fillStyle = seg.color.replace('0.7', '0.25');
-    ctx.fillRect(clampedX1, 0, clampedX2 - clampedX1, height - 20);
+    ctx.fillRect(clampedX1, 0, clampedX2 - clampedX1, height);
 
     // 境界線
     ctx.strokeStyle = seg.color;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(clampedX1, 0);
-    ctx.lineTo(clampedX1, height - 20);
+    ctx.lineTo(clampedX1, height);
     ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(clampedX2, 0);
-    ctx.lineTo(clampedX2, height - 20);
+    ctx.lineTo(clampedX2, height);
     ctx.stroke();
 
     // ラベル
@@ -415,7 +415,7 @@ const drawHeatmap = () => {
       ctx.strokeStyle = activeSeg.color;
       ctx.lineWidth = 3;
       ctx.setLineDash([5, 3]);
-      ctx.strokeRect(Math.max(0, x1), 0, Math.min(width, x2) - Math.max(0, x1), height - 20);
+      ctx.strokeRect(Math.max(0, x1), 0, Math.min(width, x2) - Math.max(0, x1), height);
       ctx.setLineDash([]);
     }
   }
