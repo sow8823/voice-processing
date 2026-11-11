@@ -32,27 +32,45 @@
           <v-card-text>
             <p class="text-body-2 mb-3">
               以下の3つの音程を順番に歌った音声を録音してください。
-              参考音ボタンを押すと、その音程の音が再生されます。
+              参考音ボタンを押すと、低い音から順番に連続で再生されます。
             </p>
             <v-list density="compact">
               <v-list-item v-for="(pitch, index) in pitchSet" :key="index">
                 <template v-slot:prepend>
                   <v-chip size="small" :color="segmentColors[index]" class="mr-2">{{ index + 1 }}</v-chip>
                 </template>
-                <v-list-item-title>{{ pitch.name }} ({{ pitch.frequency }} Hz)</v-list-item-title>
-                <template v-slot:append>
-                  <v-btn
-                    icon="mdi-play"
-                    size="small"
+                <v-list-item-title>
+                  {{ pitch.name }} ({{ pitch.frequency }} Hz)
+                  <v-chip
+                    v-if="playingIndex === index"
+                    size="x-small"
                     color="primary"
-                    variant="tonal"
-                    @click="playReferenceTone(pitch.frequency)"
-                    :title="`${pitch.name}の参考音を再生`"
-                    :disabled="isRecording"
-                  ></v-btn>
-                </template>
+                    class="ml-2"
+                  >再生中</v-chip>
+                </v-list-item-title>
               </v-list-item>
             </v-list>
+            <div class="d-flex justify-center mt-3">
+              <v-btn
+                v-if="!isPlayingSequence"
+                color="primary"
+                variant="tonal"
+                prepend-icon="mdi-play"
+                :disabled="isRecording"
+                @click="playAllReferenceTones"
+              >
+                参考音を連続再生
+              </v-btn>
+              <v-btn
+                v-else
+                color="error"
+                variant="tonal"
+                prepend-icon="mdi-stop"
+                @click="stopReferenceTones"
+              >
+                再生を停止
+              </v-btn>
+            </div>
           </v-card-text>
         </v-card>
 
@@ -236,7 +254,11 @@ const gender = ref<'male' | 'female'>('male');
 const audioContext = ref<AudioContext | null>(null);
 const isAnalyzing = ref<boolean>(false);
 const isAnalyzingFile = ref<boolean>(false);
-const oscillator = ref<OscillatorNode | null>(null);
+
+// 連続再生用の状態
+const isPlayingSequence = ref<boolean>(false);
+const playingIndex = ref<number>(-1);
+const sequenceTimeouts = ref<ReturnType<typeof setTimeout>[]>([]);
 
 // 録音関連の状態
 const isRecording = ref<boolean>(false);
@@ -312,31 +334,63 @@ const initAudioContext = () => {
   return audioContext.value;
 };
 
-// 参考音を再生する関数
-const playReferenceTone = (frequency: number) => {
-  if (oscillator.value) {
-    oscillator.value.stop();
-    oscillator.value.disconnect();
-    oscillator.value = null;
-  }
+// 1音を指定時間再生する内部関数（Web Audio API のスケジューリングを使用）
+const scheduleTone = (frequency: number, startTime: number, duration: number) => {
   const context = initAudioContext();
-  oscillator.value = context.createOscillator();
-  oscillator.value.type = 'sine';
-  oscillator.value.frequency.setValueAtTime(frequency, context.currentTime);
+  const osc = context.createOscillator();
   const gainNode = context.createGain();
-  gainNode.gain.setValueAtTime(0, context.currentTime);
-  gainNode.gain.linearRampToValueAtTime(0.5, context.currentTime + 0.1);
-  gainNode.gain.linearRampToValueAtTime(0, context.currentTime + 1.5);
-  oscillator.value.connect(gainNode);
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(frequency, startTime);
+  gainNode.gain.setValueAtTime(0, startTime);
+  gainNode.gain.linearRampToValueAtTime(0.5, startTime + 0.05);
+  gainNode.gain.setValueAtTime(0.5, startTime + duration - 0.05);
+  gainNode.gain.linearRampToValueAtTime(0, startTime + duration);
+  osc.connect(gainNode);
   gainNode.connect(context.destination);
-  oscillator.value.start();
-  setTimeout(() => {
-    if (oscillator.value) {
-      oscillator.value.stop();
-      oscillator.value.disconnect();
-      oscillator.value = null;
-    }
-  }, 1500);
+  osc.start(startTime);
+  osc.stop(startTime + duration);
+};
+
+// 全音程を低い順に連続再生する関数
+const playAllReferenceTones = () => {
+  stopReferenceTones();
+  const context = initAudioContext();
+  const pitches = pitchSet.value;
+  const toneDuration = 2.0;   // 各音の再生時間（秒）
+  const gapDuration = 0.5;    // 音と音の間隔（秒）
+  const interval = toneDuration + gapDuration;
+
+  isPlayingSequence.value = true;
+  playingIndex.value = 0;
+
+  pitches.forEach((pitch, index) => {
+    const startTime = context.currentTime + index * interval;
+    scheduleTone(pitch.frequency, startTime, toneDuration);
+
+    // 再生中インジケーターの更新
+    const startTimeout = setTimeout(() => {
+      playingIndex.value = index;
+    }, index * interval * 1000);
+    sequenceTimeouts.value.push(startTimeout);
+  });
+
+  // 全音程再生完了後にリセット
+  const totalDuration = pitches.length * interval - gapDuration;
+  const endTimeout = setTimeout(() => {
+    isPlayingSequence.value = false;
+    playingIndex.value = -1;
+    sequenceTimeouts.value = [];
+  }, totalDuration * 1000);
+  sequenceTimeouts.value.push(endTimeout);
+};
+
+// 連続再生を停止する関数
+const stopReferenceTones = () => {
+  // タイムアウトをすべてクリア
+  sequenceTimeouts.value.forEach(id => clearTimeout(id));
+  sequenceTimeouts.value = [];
+  isPlayingSequence.value = false;
+  playingIndex.value = -1;
 };
 
 // 時間フォーマット（秒 → mm:ss.xx）
@@ -565,11 +619,8 @@ onUnmounted(() => {
     URL.revokeObjectURL(recordedAudioUrl.value);
   }
 
-  // オシレーターを停止
-  if (oscillator.value) {
-    oscillator.value.stop();
-    oscillator.value.disconnect();
-  }
+  // 連続再生を停止
+  stopReferenceTones();
 
   // AudioContextを閉じる
   if (audioContext.value && audioContext.value.state !== 'closed') {
