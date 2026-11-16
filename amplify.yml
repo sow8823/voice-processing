@@ -1,0 +1,19 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - cd vue-rust-wasm-pitch
+        - node --version
+        - npm --version
+        - npm ci
+    build:
+      commands:
+        - npm run build-only
+  artifacts:
+    baseDirectory: vue-rust-wasm-pitch/dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - vue-rust-wasm-pitch/node_modules/**/*
