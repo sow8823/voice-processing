@@ -1,0 +1,15 @@
+{
+  "name": "pitch_detection",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "pitch_detection_bg.wasm",
+    "pitch_detection.js",
+    "pitch_detection.d.ts"
+  ],
+  "main": "pitch_detection.js",
+  "types": "pitch_detection.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

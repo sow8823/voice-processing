@@ -1,0 +1,498 @@
+<template>
+  <div>
+    <v-tabs v-model="activeTab" class="mb-6">
+      <v-tab value="microphone">
+        <v-icon start>mdi-microphone</v-icon>
+        マイク入力
+      </v-tab>
+      <v-tab value="file">
+        <v-icon start>mdi-file-music</v-icon>
+        ファイル入力
+      </v-tab>
+      <v-tab value="voicetype">
+        <v-icon start>mdi-account-voice</v-icon>
+        ボイスタイプ分類
+      </v-tab>
+      <v-tab value="voicetype-record">
+        <v-icon start>mdi-microphone-plus</v-icon>
+        ボイスタイプ分類（録音）
+      </v-tab>
+      <v-tab value="compare">
+        <v-icon start>mdi-compare</v-icon>
+        ファイル比較
+      </v-tab>
+    </v-tabs>
+
+    <v-window v-model="activeTab">
+      <!-- マイク入力タブ -->
+      <v-window-item value="microphone">
+        <MicrophoneInput
+          @pitch-detected="handlePitchDetected"
+          @frequency-data-updated="handleFrequencyDataUpdated"
+          @processing-state-changed="handleProcessingStateChanged"
+        />
+      </v-window-item>
+
+      <!-- ファイル入力タブ -->
+      <v-window-item value="file">
+        <AudioFileUploader
+          @audio-loaded="handleAudioFileLoaded"
+          @analysis-requested="analyzeAudioFile"
+          @playback-started="handlePlaybackStarted"
+          @playback-time-updated="handlePlaybackTimeUpdated"
+          @playback-ended="handlePlaybackEnded"
+          @playback-stopped="handlePlaybackStopped"
+          @seek-to-time="handleSeekToTime"
+          :analysis-completed="analysisCompleted"
+        />
+      </v-window-item>
+      
+      <!-- ボイスタイプ分析タブ -->
+      <v-window-item value="voicetype">
+        <VoiceTypeAnalysis
+          @analysis-requested="analyzeVoiceTypeFromSegments"
+          :analysis-completed="analysisCompleted"
+          :analysis-result="voiceTypeAnalysisResult"
+        />
+      </v-window-item>
+
+      <!-- ボイスタイプ分析（録音）タブ -->
+      <v-window-item value="voicetype-record">
+        <VoiceTypeRecorder
+          @analysis-requested="analyzeVoiceTypeFromSegments"
+          :analysis-completed="analysisCompleted"
+          :analysis-result="voiceTypeAnalysisResult"
+        />
+      </v-window-item>
+
+      <!-- ファイル比較タブ -->
+      <v-window-item value="compare">
+        <FileCompareView />
+      </v-window-item>
+    </v-window>
+
+    <!-- タブに応じて適切なヒートマップコンポーネントを表示 -->
+    <v-card class="mb-6" v-if="activeTab !== 'voicetype' && activeTab !== 'voicetype-record' && activeTab !== 'compare'">
+      <v-card-title class="d-flex align-center justify-space-between">
+        <div class="d-flex align-center">
+          <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
+          <span>周波数ヒートマップ</span>
+        </div>
+        <v-card class="legend-card">
+          <div class="legend-gradient"></div>
+          <div class="d-flex justify-space-between">
+            <span class="text-caption text-white">低</span>
+            <span class="text-caption text-white">高</span>
+          </div>
+        </v-card>
+      </v-card-title>
+      <v-card-text>
+        <!-- マイク入力（リアルタイム）モードの場合 -->
+        <RealtimeHeatMapCanvas
+          v-if="activeTab === 'microphone'"
+          ref="realtimeHeatMapCanvasRef"
+          :frequencyData="frequencyData"
+          :base-frequency="currentPitch"
+        />
+        
+        <!-- ファイル入力モードの場合 -->
+        <FileHeatMapCanvas
+          v-if="activeTab === 'file'"
+          ref="fileHeatMapCanvasRef"
+          :frequencyData="frequencyData"
+          :base-frequency="currentPitch"
+          :analysisData="analysisData"
+          :currentPlaybackTime="currentPlaybackTime"
+          :duration="fileAudioBuffer?.duration"
+        />
+      </v-card-text>
+    </v-card>
+
+    <v-row v-if="activeTab !== 'voicetype' && activeTab !== 'voicetype-record' && activeTab !== 'compare'">
+      <v-col cols="12" md="6">
+        <v-card height="100%">
+          <v-card-title>
+            <v-icon start icon="mdi-waveform" class="mr-2"></v-icon>
+            ピッチ検出
+          </v-card-title>
+          <v-card-text>
+            <PitchCanvas :currentPitch="currentPitch" />
+          </v-card-text>
+        </v-card>
+      </v-col>
+      
+      <v-col cols="12" md="6">
+        <v-card height="100%">
+          <v-card-title>
+            <v-icon start icon="mdi-chart-bar" class="mr-2"></v-icon>
+            周波数スペクトル
+          </v-card-title>
+          <v-card-text>
+            <SpectrumCanvas
+              :frequencyData="frequencyData"
+              :base-frequency="currentPitch"
+              :detectedBaseFrequency="detectedBaseFrequency"
+              :detectedHarmonic2Frequency="detectedHarmonic2Frequency"
+              :detectedHarmonic3Frequency="detectedHarmonic3Frequency"
+            />
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onUnmounted, watch, onMounted } from "vue";
+import PitchCanvas from "../atoms/PitchCanvas.vue";
+import SpectrumCanvas from "../atoms/SpectrumCanvas.vue";
+import { audioService, pitchDetectionService } from "../../services";
+import { VoiceTypeAnalysisService } from "../../services/VoiceTypeAnalysisService";
+import { frequencyAnalysisServiceWebAudio } from "../../services/FrequencyAnalysisServiceWebAudio";
+import RealtimeHeatMapCanvas from "../atoms/RealtimeHeatMapCanvas.vue";
+import FileHeatMapCanvas from "../atoms/FileHeatMapCanvas.vue";
+import AudioFileUploader from "../molecules/AudioFileUploader.vue";
+import MicrophoneInput from "../molecules/MicrophoneInput.vue";
+import VoiceTypeAnalysis from "../molecules/VoiceTypeAnalysis.vue";
+import VoiceTypeRecorder from "../molecules/VoiceTypeRecorder.vue";
+import FileCompareView from "./FileCompareView.vue";
+import type { VoiceTypeAnalysisResult } from "../../services/VoiceTypeAnalysisService";
+
+const activeTab = ref<string>("microphone");
+const currentPitch = ref<number>(0);
+const frequencyData = ref<Uint8Array>(new Uint8Array(1024));
+const isProcessing = ref<boolean>(false);
+const fileAudioBuffer = ref<AudioBuffer | null>(null);
+const realtimeHeatMapCanvasRef = ref<InstanceType<typeof RealtimeHeatMapCanvas> | null>(null);
+const fileHeatMapCanvasRef = ref<InstanceType<typeof FileHeatMapCanvas> | null>(null);
+const analysisCompleted = ref<boolean>(false);
+
+// 分析データを保存するための状態
+const analysisData = ref<{
+  pitchData: number[];
+  frequencyData: Uint8Array[];
+  timestamps: number[];
+}>({
+  pitchData: [],
+  frequencyData: [],
+  timestamps: []
+});
+
+// ボイスタイプ分析結果を保存するための状態
+const voiceTypeAnalysisResult = ref<VoiceTypeAnalysisResult | null>(null);
+
+// 検出された基音成分と倍音成分の周波数
+const detectedBaseFrequency = ref<number | undefined>(undefined);
+const detectedHarmonic2Frequency = ref<number | undefined>(undefined);
+const detectedHarmonic3Frequency = ref<number | undefined>(undefined);
+
+// 現在の再生位置
+const currentPlaybackTime = ref<number>(0);
+
+// タブ切り替え時の処理
+watch(activeTab, (newTab, oldTab) => {
+  console.log(`タブが切り替わりました: ${oldTab} -> ${newTab}`);
+  
+  // データをリセット
+  resetData();
+});
+
+// データをリセットする関数
+const resetData = () => {
+  currentPitch.value = 0;
+  frequencyData.value = new Uint8Array(1024);
+  analysisData.value = {
+    pitchData: [],
+    frequencyData: [],
+    timestamps: []
+  };
+  currentPlaybackTime.value = 0;
+  detectedBaseFrequency.value = undefined;
+  detectedHarmonic2Frequency.value = undefined;
+  detectedHarmonic3Frequency.value = undefined;
+  analysisCompleted.value = false;
+};
+
+// マイク入力関連のハンドラ
+const handlePitchDetected = (pitch: number) => {
+  currentPitch.value = pitch;
+};
+
+const handleFrequencyDataUpdated = (data: Uint8Array) => {
+  frequencyData.value = data;
+};
+
+const handleProcessingStateChanged = (state: boolean) => {
+  isProcessing.value = state;
+};
+
+// ファイル入力関連のハンドラ
+const handleAudioFileLoaded = (buffer: AudioBuffer) => {
+  fileAudioBuffer.value = buffer;
+  console.log('音声ファイルが読み込まれました:', buffer.duration, '秒');
+};
+
+const analyzeAudioFile = async (buffer: AudioBuffer) => {
+  try {
+    analysisCompleted.value = false;
+    
+    console.log('音声ファイルの分析を開始します');
+    
+    // 分析データを初期化
+    analysisData.value = {
+      pitchData: [],
+      frequencyData: [],
+      timestamps: []
+    };
+    
+    // ピッチ検出サービスを初期化
+    await pitchDetectionService.initialize();
+    
+    // 周波数分析サービスを初期化
+    await frequencyAnalysisServiceWebAudio.initialize(16384); // fftSizeを16384に設定
+    
+    // 音声ファイルを分析
+    const sampleRate = buffer.sampleRate;
+    const bufferSize = 8192; // bufferSizeを8192に設定
+    const hopSize = 256; // hopSizeを256に設定
+    const numFrames = Math.floor((buffer.length - bufferSize) / hopSize) + 1;
+    
+    // 分析用の一時バッファ
+    const tempBuffer = new Float32Array(bufferSize);
+    const pitchBuffer = new Float32Array(2048); // ピッチ検出用のバッファ
+
+    // バッチ処理で周波数データを取得
+    const { frequencyDataArray, timestamps } = await frequencyAnalysisServiceWebAudio.analyzeAudioBufferBatch(
+      buffer,
+      bufferSize,
+      hopSize
+    );
+    
+    // 各フレームを分析
+    for (let i = 0; i < numFrames && i < frequencyDataArray.length; i++) {
+      // フレームの開始位置
+      const startSample = i * hopSize;
+      
+      // バッファにフレームのデータをコピー
+      buffer.copyFromChannel(pitchBuffer, 0, startSample);
+      buffer.copyFromChannel(tempBuffer, 0, startSample);
+      
+      // ピッチを検出
+      const pitch = pitchDetectionService.detectPitch(pitchBuffer, sampleRate);
+      
+      // 結果を保存
+      analysisData.value.pitchData.push(pitch);
+      analysisData.value.frequencyData.push(new Uint8Array(frequencyDataArray[i])); // コピーを作成して保存
+      analysisData.value.timestamps.push(timestamps[i]);
+    }
+    
+    console.log(`分析完了: ${numFrames}フレーム`);
+    analysisCompleted.value = true;
+  } catch (error) {
+    console.error('音声ファイルの分析に失敗しました:', error);
+    alert('音声ファイルの分析に失敗しました。');
+  }
+};
+
+// 再生関連のハンドラ
+const handlePlaybackStarted = (currentTime: number) => {
+  console.log('再生開始:', currentTime);
+  updateDisplayForPlayback(currentTime);
+};
+
+const handlePlaybackTimeUpdated = (currentTime: number) => {
+  currentPlaybackTime.value = currentTime;
+  updateDisplayForPlayback(currentTime);
+};
+
+const handlePlaybackEnded = () => {
+  console.log('再生終了');
+  currentPlaybackTime.value = 0;
+};
+
+const handlePlaybackStopped = () => {
+  console.log('再生停止');
+  currentPlaybackTime.value = 0;
+};
+
+const handleSeekToTime = (seekTime: number) => {
+  console.log('シーク:', seekTime);
+  updateDisplayForPlayback(seekTime);
+};
+
+// 再生位置に応じて表示を更新する関数
+const updateDisplayForPlayback = (time: number) => {
+  if (!analysisData.value.timestamps.length) return;
+  
+  // 現在の時間に最も近いフレームのインデックスを見つける
+  const timestamps = analysisData.value.timestamps;
+  let closestIndex = 0;
+  let minDiff = Math.abs(timestamps[0] - time);
+  
+  for (let i = 1; i < timestamps.length; i++) {
+    const diff = Math.abs(timestamps[i] - time);
+    if (diff < minDiff) {
+      minDiff = diff;
+      closestIndex = i;
+    }
+  }
+  
+  // 対応するデータを表示
+  currentPitch.value = analysisData.value.pitchData[closestIndex] || 0;
+  
+  // frequencyDataを更新（コピーを作成）
+  if (analysisData.value.frequencyData[closestIndex]) {
+    const sourceData = analysisData.value.frequencyData[closestIndex];
+    // 既存のfrequencyDataがあれば同じサイズで再利用、なければ新規作成
+    if (!frequencyData.value || frequencyData.value.length !== sourceData.length) {
+      frequencyData.value = new Uint8Array(sourceData.length);
+    }
+    // データをコピー
+    frequencyData.value.set(sourceData);
+  } else {
+    frequencyData.value = new Uint8Array(1024);
+  }
+};
+
+// ボイスタイプ分析関連のハンドラ（1ファイル + セグメント指定方式）
+const analyzeVoiceTypeFromSegments = async (
+  audioBuffer: AudioBuffer,
+  gender: string,
+  segments: Array<{ id: 'low' | 'mid' | 'high'; start: number | null; end: number | null }>
+) => {
+  try {
+    analysisCompleted.value = false;
+    voiceTypeAnalysisResult.value = null;
+
+    console.log('ボイスタイプ分析を開始します（セグメント指定方式）');
+    console.log(`性別: ${gender}`);
+    console.log('セグメント:', segments);
+
+    // 周波数分析サービスを初期化
+    await frequencyAnalysisServiceWebAudio.initialize(16384);
+
+    // ボイスタイプ分析サービスのインスタンスを作成
+    const voiceTypeAnalysisService = new VoiceTypeAnalysisService();
+
+    const bufferSize = 8192;
+    const hopSize = 512;
+    const sampleRate = audioBuffer.sampleRate;
+
+    // 各セグメントの周波数データを抽出する
+    const pitchFrequencyDataArrays: Record<string, Uint8Array[]> = {};
+
+    for (const seg of segments) {
+      if (seg.start === null || seg.end === null) continue;
+
+      const startSample = Math.floor(seg.start * sampleRate);
+      const endSample = Math.floor(seg.end * sampleRate);
+      const segmentLength = endSample - startSample;
+
+      if (segmentLength <= 0) continue;
+
+      console.log(`セグメント ${seg.id}: ${seg.start.toFixed(2)}s - ${seg.end.toFixed(2)}s (${segmentLength}サンプル)`);
+
+      // セグメント分のオフラインAudioBufferを作成
+      const offlineCtx = new OfflineAudioContext(
+        audioBuffer.numberOfChannels,
+        segmentLength,
+        sampleRate
+      );
+
+      const segBuffer = offlineCtx.createBuffer(
+        audioBuffer.numberOfChannels,
+        segmentLength,
+        sampleRate
+      );
+
+      // 各チャンネルのデータをコピー
+      for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+        const srcData = audioBuffer.getChannelData(ch);
+        const dstData = segBuffer.getChannelData(ch);
+        for (let i = 0; i < segmentLength; i++) {
+          dstData[i] = srcData[startSample + i] ?? 0;
+        }
+      }
+
+      // セグメントバッファを周波数分析
+      const { frequencyDataArray } = await frequencyAnalysisServiceWebAudio.analyzeAudioBufferBatch(
+        segBuffer,
+        bufferSize,
+        hopSize
+      );
+
+      pitchFrequencyDataArrays[seg.id] = frequencyDataArray;
+      console.log(`セグメント ${seg.id} 分析完了: ${frequencyDataArray.length}フレーム`);
+    }
+
+    // pitchIdをgenderに対応したキーにマッピング
+    // analyzeMultiplePitchesはgenderPitchSetsのidを使うため、
+    // セグメントid（low/mid/high）をgenderに対応したpitchIdに変換する
+    const genderPitchIds: Record<string, string[]> = {
+      male: ['e3', 'e4', 'a4'],
+      female: ['a3', 'a4', 'e5'],
+    };
+    const pitchIds = genderPitchIds[gender] ?? genderPitchIds['male'];
+    const segmentOrder: Array<'low' | 'mid' | 'high'> = ['low', 'mid', 'high'];
+
+    const mappedFreqDataArrays: Record<string, Uint8Array[]> = {};
+    segmentOrder.forEach((segId, idx) => {
+      if (pitchFrequencyDataArrays[segId]) {
+        mappedFreqDataArrays[pitchIds[idx]] = pitchFrequencyDataArrays[segId];
+      }
+    });
+
+    // ボイスタイプを分析
+    const result = voiceTypeAnalysisService.analyzeMultiplePitches(
+      mappedFreqDataArrays,
+      sampleRate,
+      gender as 'male' | 'female'
+    );
+
+    voiceTypeAnalysisResult.value = result;
+    console.log('ボイスタイプ分析結果:', result);
+    analysisCompleted.value = true;
+  } catch (error) {
+    console.error('ボイスタイプ分析に失敗しました:', error);
+    alert('ボイスタイプ分析に失敗しました。');
+    analysisCompleted.value = false;
+  }
+};
+
+// コンポーネントがマウントされたときの初期化
+onMounted(async () => {
+  try {
+    // 周波数分析サービスを初期化
+    await frequencyAnalysisServiceWebAudio.initialize();
+    console.log('周波数分析サービスが初期化されました');
+  } catch (error) {
+    console.error('周波数分析サービスの初期化に失敗しました:', error);
+  }
+});
+
+// コンポーネントがアンマウントされたときのクリーンアップ
+onUnmounted(() => {
+  // リソースを解放
+  pitchDetectionService.dispose();
+  audioService.dispose();
+  frequencyAnalysisServiceWebAudio.dispose();
+});
+</script>
+
+<style scoped>
+.legend-card {
+  background: transparent;
+  width: 100px;
+  padding: 4px;
+  border-radius: 4px;
+  margin-left: 16px;
+}
+
+.legend-gradient {
+  height: 10px;
+  width: 100%;
+  background: linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000);
+  border-radius: 2px;
+  margin-bottom: 2px;
+}
+</style>

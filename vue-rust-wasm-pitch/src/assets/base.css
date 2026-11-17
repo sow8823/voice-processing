@@ -1,0 +1,34 @@
+/* Vuetifyのテーマシステムを使用しているため、カスタムCSSの変数は最小限に保っています */
+/* 基本的なスタイルのみを定義します */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    'Fira Sans',
+    'Droid Sans',
+    'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* キャンバス要素のための基本スタイル */
+canvas {
+  display: block;
+}

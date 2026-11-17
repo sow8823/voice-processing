@@ -1,0 +1,20 @@
+[package]
+name = "pitch-detection-fixed"
+description = "A collection of algorithms to determine the pitch of a sound sample, with bug fixes."
+version = "0.1.0"
+authors = ["Original: Alessandro Genova <ales.genova@gmail.com>", "Modified: Your Name"]
+edition = "2021"
+license = "MIT/Apache-2.0"
+keywords = ["pitch", "frequency", "detection", "sound"]
+categories = ["algorithms", "multimedia::audio", "no-std"]
+
+[dependencies]
+rustfft = { version = "6.0.1", default-features = false }
+
+[dev-dependencies]
+criterion = "0.3"
+hound = { version = "3.4.0" }
+
+[[bench]]
+name = "utils_benchmark"
+harness = false
