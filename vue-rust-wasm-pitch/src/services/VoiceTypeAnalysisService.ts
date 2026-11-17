@@ -9,6 +9,29 @@ export type VoiceRegister = 'modal' | 'falsetto' | 'middle';
 // ボイスタイプの定義を拡張（フリップとミックスを追加）
 export type VoiceType = 'lightChest' | 'pull' | 'flip' | 'mixed' | 'unknown';
 
+// 複合型ボイスタイプ分析結果
+export interface CompositeVoiceTypeAnalysisResult {
+  // 各ボイスタイプの貢献度（0-100%、出現した音程数 / 全音程数）
+  voiceTypeScores: Record<VoiceType, number>;
+  // 検出されたボイスタイプの一覧（スコアが閾値以上のもの）
+  detectedTypes: VoiceType[];
+  // 音程別の分析結果
+  pitchResults: Record<string, {
+    parameters: {
+      spectralSlope: number;
+      highFrequencyRatio: number;
+      nonIntegerHarmonics: number;
+    };
+    voiceRegister: VoiceRegister;
+    detectedFeatures: {
+      lightChest: boolean;
+      pull: boolean;
+      flip: boolean;
+      mixed: boolean;
+    };
+  }>;
+}
+
 export interface VoiceTypeAnalysisResult {
   voiceType: VoiceType;
   confidence: number; // 0-1の範囲で分類の確信度
@@ -973,5 +996,165 @@ export class VoiceTypeAnalysisService {
       bandPeakRatio,
       highFreqRatio
     };
+  }
+
+  /**
+   * 複合型ボイスタイプ分析：各音程で独立してすべてのボイスタイプ特徴をチェックし、
+   * 複数のボイスタイプ要素を列挙する
+   */
+  analyzeMultiplePitchesComposite(
+    frequencyDataArrays: Record<string, Uint8Array[]>,
+    sampleRate: number,
+    gender: 'male' | 'female'
+  ): CompositeVoiceTypeAnalysisResult {
+    const pitchSet = this.genderPitchSets[gender];
+    const lowPitch = pitchSet[0];
+    const midPitch = pitchSet[1];
+    const highPitch = pitchSet[2];
+
+    const lowArr = frequencyDataArrays[lowPitch.id];
+    const midArr = frequencyDataArrays[midPitch.id];
+    const highArr = frequencyDataArrays[highPitch.id];
+
+    if (!lowArr || !midArr || !highArr ||
+        lowArr.length === 0 || midArr.length === 0 || highArr.length === 0) {
+      return {
+        voiceTypeScores: { lightChest: 0, pull: 0, flip: 0, mixed: 0, unknown: 0 },
+        detectedTypes: [],
+        pitchResults: {}
+      };
+    }
+
+    const analyzePitchParams = (freqDataArray: Uint8Array[], pitch: { id: string; name: string; frequency: number }) => {
+      let totalSlope = 0, totalHfr = 0, totalNih = 0, count = 0;
+      for (const freqData of freqDataArray) {
+        const baseFreq = this.findStrongestFrequencyComponent(freqData, pitch.frequency, sampleRate, 0.05);
+        const hr = this.analyzeHarmonicComponents(freqData, baseFreq, sampleRate);
+        const hfr = this.calculateHighFrequencyRatio(freqData, sampleRate, 2000, 5000, pitch.frequency);
+        const nih = this.analyzeNonIntegerHarmonics(freqData, pitch.frequency, sampleRate);
+        const fftSize = freqData.length * 2;
+        const baseIdx = Math.round((pitch.frequency / sampleRate) * fftSize);
+        const baseAmp = baseIdx < freqData.length ? freqData[baseIdx] : 0;
+        if (!isNaN(hr.spectralSlope) && !isNaN(hfr) && !isNaN(nih) && baseAmp >= 4) {
+          totalSlope += hr.spectralSlope; totalHfr += hfr; totalNih += nih; count++;
+        }
+      }
+      if (count === 0) count = 1;
+      const avgSlope = totalSlope / count;
+      const avgHfr = totalHfr / count;
+      const avgNih = totalNih / count;
+      const isChest = avgSlope >= -8 && avgSlope <= -2;
+      const hasHf = avgHfr >= 0.3;
+      let voiceRegister: VoiceRegister;
+      if (isChest && hasHf) voiceRegister = 'modal';
+      else if (hasHf) voiceRegister = 'middle';
+      else voiceRegister = 'falsetto';
+      return { parameters: { spectralSlope: avgSlope, highFrequencyRatio: avgHfr, nonIntegerHarmonics: avgNih }, voiceRegister };
+    };
+
+    const low = analyzePitchParams(lowArr, lowPitch);
+    const mid = analyzePitchParams(midArr, midPitch);
+    const high = analyzePitchParams(highArr, highPitch);
+
+    const detectFeatures = (
+      params: { highFrequencyRatio: number; nonIntegerHarmonics: number },
+      reg: VoiceRegister,
+      prev: VoiceRegister | null
+    ) => ({
+      lightChest: reg === 'falsetto' || (reg === 'middle' && params.highFrequencyRatio < 0.3),
+      pull: (reg === 'modal' || reg === 'middle') && params.highFrequencyRatio >= 0.3 && params.nonIntegerHarmonics >= 0.3,
+      mixed: (reg === 'modal' || reg === 'middle') && params.highFrequencyRatio >= 0.3 && params.nonIntegerHarmonics < 0.3,
+      flip: prev !== null && (
+        (prev === 'modal' && (reg === 'falsetto' || reg === 'middle')) ||
+        (prev === 'middle' && reg === 'falsetto')
+      ),
+    });
+
+    const lowF = detectFeatures(low.parameters, low.voiceRegister, null);
+    const midF = detectFeatures(mid.parameters, mid.voiceRegister, low.voiceRegister);
+    const highF = detectFeatures(high.parameters, high.voiceRegister, mid.voiceRegister);
+
+    const pitchResults: CompositeVoiceTypeAnalysisResult['pitchResults'] = {
+      [lowPitch.id]: { parameters: low.parameters, voiceRegister: low.voiceRegister, detectedFeatures: lowF },
+      [midPitch.id]: { parameters: mid.parameters, voiceRegister: mid.voiceRegister, detectedFeatures: midF },
+      [highPitch.id]: { parameters: high.parameters, voiceRegister: high.voiceRegister, detectedFeatures: highF },
+    };
+
+    // ---- スコア算出（既存ボイスタイプ分類の着目音程に準拠した強度ベース） ----
+
+    // ライトチェスト：低・中・高 全3音程の平均（判定なしの音程は0%）
+    // 高周波比率 0.3〜0.1 → 0〜100%（0.1以下は100%、0.3以上は0%）
+    const calcLightChestScore = (hfr: number): number => {
+      if (hfr <= 0.1) return 100;
+      if (hfr >= 0.3) return 0;
+      return Math.round(((0.3 - hfr) / (0.3 - 0.1)) * 100);
+    };
+    const lightChestScore = Math.round(
+      ((lowF.lightChest  ? calcLightChestScore(low.parameters.highFrequencyRatio)  : 0) +
+       (midF.lightChest  ? calcLightChestScore(mid.parameters.highFrequencyRatio)  : 0) +
+       (highF.lightChest ? calcLightChestScore(high.parameters.highFrequencyRatio) : 0)) / 3
+    );
+
+    // プル：低・中・高 全3音程の平均（判定なしの音程は0%）
+    // 非整数次倍音 0.3〜0.5 → 0〜100%（0.5以上は100%）
+    const calcPullScore = (nih: number): number => {
+      if (nih >= 0.5) return 100;
+      if (nih <= 0.3) return 0;
+      return Math.round(((nih - 0.3) / (0.5 - 0.3)) * 100);
+    };
+    const pullScore = Math.round(
+      ((lowF.pull  ? calcPullScore(low.parameters.nonIntegerHarmonics)  : 0) +
+       (midF.pull  ? calcPullScore(mid.parameters.nonIntegerHarmonics)  : 0) +
+       (highF.pull ? calcPullScore(high.parameters.nonIntegerHarmonics) : 0)) / 3
+    );
+
+    // フリップ：判定が出た区間のみで強度を決定（どちらか一方のみ判定される前提）
+    // 高周波比率の差分（前 - 現在）0〜0.5 → 0〜100%（0以下は0%、0.5以上は100%）
+    const calcFlipScore = (prevHfr: number, curHfr: number): number => {
+      const diff = prevHfr - curHfr;
+      if (diff <= 0) return 0;
+      if (diff >= 0.5) return 100;
+      return Math.round((diff / 0.5) * 100);
+    };
+    let flipScore = 0;
+    if (midF.flip)  flipScore = calcFlipScore(low.parameters.highFrequencyRatio, mid.parameters.highFrequencyRatio);
+    if (highF.flip) flipScore = calcFlipScore(mid.parameters.highFrequencyRatio, high.parameters.highFrequencyRatio);
+
+    // ミックス：低・中・高 全3音程の平均（判定なしの音程は0%）
+    //   各音程スコア = (非整数次倍音スコア + 高周波比率スコア) / 2
+    const calcMixedNihScore = (nih: number): number => {
+      if (nih <= 0.1) return 100;
+      if (nih >= 0.3) return 0;
+      return Math.round(((0.3 - nih) / (0.3 - 0.1)) * 100);
+    };
+    const calcMixedHfrScore = (hfr: number): number => {
+      if (hfr >= 0.5) return 100;
+      if (hfr <= 0.3) return 0;
+      return Math.round(((hfr - 0.3) / (0.5 - 0.3)) * 100);
+    };
+    const mixedScore = Math.round(
+      ((lowF.mixed  ? Math.round((calcMixedNihScore(low.parameters.nonIntegerHarmonics)  + calcMixedHfrScore(low.parameters.highFrequencyRatio))  / 2) : 0) +
+       (midF.mixed  ? Math.round((calcMixedNihScore(mid.parameters.nonIntegerHarmonics)  + calcMixedHfrScore(mid.parameters.highFrequencyRatio))  / 2) : 0) +
+       (highF.mixed ? Math.round((calcMixedNihScore(high.parameters.nonIntegerHarmonics) + calcMixedHfrScore(high.parameters.highFrequencyRatio)) / 2) : 0)) / 3
+    );
+
+    const THRESHOLD = 33;
+    const voiceTypeScores: Record<VoiceType, number> = {
+      lightChest: lightChestScore,
+      pull: pullScore,
+      flip: flipScore,
+      mixed: mixedScore,
+      unknown: 0,
+    };
+
+    const detectedTypes: VoiceType[] = [];
+    if (voiceTypeScores.lightChest >= THRESHOLD) detectedTypes.push('lightChest');
+    if (voiceTypeScores.pull >= THRESHOLD) detectedTypes.push('pull');
+    if (voiceTypeScores.flip >= THRESHOLD) detectedTypes.push('flip');
+    if (voiceTypeScores.mixed >= THRESHOLD) detectedTypes.push('mixed');
+    if (detectedTypes.length === 0) { detectedTypes.push('unknown'); voiceTypeScores.unknown = 100; }
+
+    console.log('複合型ボイスタイプ分析結果:', voiceTypeScores, detectedTypes);
+    return { voiceTypeScores, detectedTypes, pitchResults };
   }
 }

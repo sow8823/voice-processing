@@ -17,6 +17,14 @@
         <v-icon start>mdi-microphone-plus</v-icon>
         ボイスタイプ分類（録音）
       </v-tab>
+      <v-tab value="voicetype-composite">
+        <v-icon start>mdi-dna</v-icon>
+        複合型分析
+      </v-tab>
+      <v-tab value="voicetype-composite-record">
+        <v-icon start>mdi-microphone-multiple</v-icon>
+        複合型分析（録音）
+      </v-tab>
       <v-tab value="compare">
         <v-icon start>mdi-compare</v-icon>
         ファイル比較
@@ -69,10 +77,28 @@
       <v-window-item value="compare">
         <FileCompareView />
       </v-window-item>
+
+      <!-- 複合型ボイスタイプ分析タブ -->
+      <v-window-item value="voicetype-composite">
+        <VoiceTypeAnalysisComposite
+          @analysis-requested="analyzeVoiceTypeFromSegmentsComposite"
+          :analysis-completed="compositeAnalysisCompleted"
+          :analysis-result="compositeVoiceTypeAnalysisResult"
+        />
+      </v-window-item>
+
+      <!-- 複合型ボイスタイプ分析（録音）タブ -->
+      <v-window-item value="voicetype-composite-record">
+        <VoiceTypeRecorderComposite
+          @analysis-requested="analyzeVoiceTypeFromSegmentsComposite"
+          :analysis-completed="compositeAnalysisCompleted"
+          :analysis-result="compositeVoiceTypeAnalysisResult"
+        />
+      </v-window-item>
     </v-window>
 
     <!-- タブに応じて適切なヒートマップコンポーネントを表示 -->
-    <v-card class="mb-6" v-if="activeTab !== 'voicetype' && activeTab !== 'voicetype-record' && activeTab !== 'compare'">
+    <v-card class="mb-6" v-if="activeTab !== 'voicetype' && activeTab !== 'voicetype-record' && activeTab !== 'compare' && activeTab !== 'voicetype-composite' && activeTab !== 'voicetype-composite-record'">
       <v-card-title class="d-flex align-center justify-space-between">
         <div class="d-flex align-center">
           <v-icon start icon="mdi-gradient-vertical" class="mr-2"></v-icon>
@@ -108,7 +134,7 @@
       </v-card-text>
     </v-card>
 
-    <v-row v-if="activeTab !== 'voicetype' && activeTab !== 'voicetype-record' && activeTab !== 'compare'">
+    <v-row v-if="activeTab !== 'voicetype' && activeTab !== 'voicetype-record' && activeTab !== 'compare' && activeTab !== 'voicetype-composite' && activeTab !== 'voicetype-composite-record'">
       <v-col cols="12" md="6">
         <v-card height="100%">
           <v-card-title>
@@ -155,8 +181,10 @@ import AudioFileUploader from "../molecules/AudioFileUploader.vue";
 import MicrophoneInput from "../molecules/MicrophoneInput.vue";
 import VoiceTypeAnalysis from "../molecules/VoiceTypeAnalysis.vue";
 import VoiceTypeRecorder from "../molecules/VoiceTypeRecorder.vue";
+import VoiceTypeAnalysisComposite from "../molecules/VoiceTypeAnalysisComposite.vue";
+import VoiceTypeRecorderComposite from "../molecules/VoiceTypeRecorderComposite.vue";
 import FileCompareView from "./FileCompareView.vue";
-import type { VoiceTypeAnalysisResult } from "../../services/VoiceTypeAnalysisService";
+import type { VoiceTypeAnalysisResult, CompositeVoiceTypeAnalysisResult } from "../../services/VoiceTypeAnalysisService";
 
 const activeTab = ref<string>("microphone");
 const currentPitch = ref<number>(0);
@@ -180,6 +208,10 @@ const analysisData = ref<{
 
 // ボイスタイプ分析結果を保存するための状態
 const voiceTypeAnalysisResult = ref<VoiceTypeAnalysisResult | null>(null);
+
+// 複合型ボイスタイプ分析結果を保存するための状態
+const compositeAnalysisCompleted = ref<boolean>(false);
+const compositeVoiceTypeAnalysisResult = ref<CompositeVoiceTypeAnalysisResult | null>(null);
 
 // 検出された基音成分と倍音成分の周波数
 const detectedBaseFrequency = ref<number | undefined>(undefined);
@@ -456,6 +488,66 @@ const analyzeVoiceTypeFromSegments = async (
     console.error('ボイスタイプ分析に失敗しました:', error);
     alert('ボイスタイプ分析に失敗しました。');
     analysisCompleted.value = false;
+  }
+};
+
+// 複合型ボイスタイプ分析（セグメント指定方式）
+const analyzeVoiceTypeFromSegmentsComposite = async (
+  audioBuffer: AudioBuffer,
+  gender: string,
+  segments: Array<{ id: 'low' | 'mid' | 'high'; start: number | null; end: number | null }>
+) => {
+  try {
+    compositeAnalysisCompleted.value = false;
+    compositeVoiceTypeAnalysisResult.value = null;
+
+    console.log('複合型ボイスタイプ分析を開始します（セグメント指定方式）');
+
+    await frequencyAnalysisServiceWebAudio.initialize(16384);
+
+    const voiceTypeAnalysisService = new VoiceTypeAnalysisService();
+    const bufferSize = 8192, hopSize = 512;
+    const sampleRate = audioBuffer.sampleRate;
+    const pitchFrequencyDataArrays: Record<string, Uint8Array[]> = {};
+
+    for (const seg of segments) {
+      if (seg.start === null || seg.end === null) continue;
+      const startSample = Math.floor(seg.start * sampleRate);
+      const endSample = Math.floor(seg.end * sampleRate);
+      const segmentLength = endSample - startSample;
+      if (segmentLength <= 0) continue;
+
+      const offlineCtx = new OfflineAudioContext(audioBuffer.numberOfChannels, segmentLength, sampleRate);
+      const segBuffer = offlineCtx.createBuffer(audioBuffer.numberOfChannels, segmentLength, sampleRate);
+      for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+        const srcData = audioBuffer.getChannelData(ch);
+        const dstData = segBuffer.getChannelData(ch);
+        for (let i = 0; i < segmentLength; i++) { dstData[i] = srcData[startSample + i] ?? 0; }
+      }
+
+      const { frequencyDataArray } = await frequencyAnalysisServiceWebAudio.analyzeAudioBufferBatch(segBuffer, bufferSize, hopSize);
+      pitchFrequencyDataArrays[seg.id] = frequencyDataArray;
+    }
+
+    const genderPitchIds: Record<string, string[]> = { male: ['e3', 'e4', 'a4'], female: ['a3', 'a4', 'e5'] };
+    const pitchIds = genderPitchIds[gender] ?? genderPitchIds['male'];
+    const segmentOrder: Array<'low' | 'mid' | 'high'> = ['low', 'mid', 'high'];
+    const mappedFreqDataArrays: Record<string, Uint8Array[]> = {};
+    segmentOrder.forEach((segId, idx) => { if (pitchFrequencyDataArrays[segId]) mappedFreqDataArrays[pitchIds[idx]] = pitchFrequencyDataArrays[segId]; });
+
+    const result = voiceTypeAnalysisService.analyzeMultiplePitchesComposite(
+      mappedFreqDataArrays,
+      sampleRate,
+      gender as 'male' | 'female'
+    );
+
+    compositeVoiceTypeAnalysisResult.value = result;
+    console.log('複合型ボイスタイプ分析結果:', result);
+    compositeAnalysisCompleted.value = true;
+  } catch (error) {
+    console.error('複合型ボイスタイプ分析に失敗しました:', error);
+    alert('複合型ボイスタイプ分析に失敗しました。');
+    compositeAnalysisCompleted.value = false;
   }
 };
 
