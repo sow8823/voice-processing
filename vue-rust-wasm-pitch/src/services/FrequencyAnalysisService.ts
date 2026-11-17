@@ -2,9 +2,9 @@
  * 周波数分析を担当するサービス
  */
 export interface HarmonicAnalysisResult {
-  harmonic2Ratio: number;  // 2倍音の強度比率（%）
-  harmonic3Ratio: number;  // 3倍音の強度比率（%）
+  spectralSlope: number;   // スペクトル傾斜（dB/oct）（-6～-10: 地声、-10～-13: 中間、-13～-18: 裏声）
   bandPeakRatio: number;   // 特定の周波数帯域（2.8kHz～3.2kHz）の最大成分比率（%）
+  highFreqRatio: number;   // 2.5kHz～6kHzの周波数帯域の最大成分比率（%）
 }
 
 export class FrequencyAnalysisService {
@@ -34,9 +34,9 @@ export class FrequencyAnalysisService {
     // 基本周波数が低すぎる場合は分析しない
     if (!baseFrequency || baseFrequency < 50) {
       return {
-        harmonic2Ratio: 0,
-        harmonic3Ratio: 0,
-        bandPeakRatio: 0
+        spectralSlope: 0,
+        bandPeakRatio: 0,
+        highFreqRatio: 0
       };
     }
 
@@ -46,22 +46,69 @@ export class FrequencyAnalysisService {
     const baseIdx = this.getFrequencyIndex(baseFrequency, sampleRate, fftSize);
     const baseAmp = frequencyData[baseIdx] || 1; // ゼロ除算を防ぐため、最小値を1とする
     
-    // 2倍音のインデックスと振幅を計算
-    const harmonic2Idx = this.getFrequencyIndex(baseFrequency * 2, sampleRate, fftSize);
-    const harmonic2Amp = harmonic2Idx < frequencyData.length ? frequencyData[harmonic2Idx] : 0;
-    const harmonic2Ratio = (harmonic2Amp / baseAmp) * 100;
+    // スペクトル傾斜を計算（dB/oct単位）
     
-    // 3倍音のインデックスと振幅を計算
-    const harmonic3Idx = this.getFrequencyIndex(baseFrequency * 3, sampleRate, fftSize);
-    const harmonic3Amp = harmonic3Idx < frequencyData.length ? frequencyData[harmonic3Idx] : 0;
-    const harmonic3Ratio = (harmonic3Amp / baseAmp) * 100;
+    // 有効な周波数範囲を決定（ノイズを避けるため、基本周波数から上限までを考慮）
+    const slopeStartIdx = Math.max(1, baseIdx - 5); // 基本周波数の少し下から
+    const slopeEndIdx = Math.min(frequencyData.length - 1, this.getFrequencyIndex(baseFrequency * 10, sampleRate, fftSize)); // 基本周波数の10倍まで
+    
+    // 周波数と振幅の配列を作成（対数スケールに変換）
+    const frequencies: number[] = [];
+    const amplitudesDB: number[] = [];
+    
+    for (let i = slopeStartIdx; i <= slopeEndIdx; i++) {
+      // インデックスから周波数を計算
+      const frequency = (i / fftSize) * sampleRate;
+      // 対応する振幅を取得
+      const amplitude = frequencyData[i];
+      
+      // 有効なデータのみを追加
+      if (amplitude > 0) {
+        // 周波数をオクターブスケールに変換（log2）
+        frequencies.push(Math.log2(frequency));
+        // 振幅をdBスケールに変換（20 * log10）
+        amplitudesDB.push(20 * Math.log10(amplitude / 255));
+      }
+    }
+    
+    // データが不足している場合は計算できない
+    if (frequencies.length < 2) {
+      return {
+        spectralSlope: -10, // デフォルト値として中間的な値を設定
+        bandPeakRatio: 0,
+        highFreqRatio: 0
+      };
+    }
+    
+    // 線形回帰で傾きを計算
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumX2 = 0;
+    const n = frequencies.length;
+    
+    for (let i = 0; i < n; i++) {
+      sumX += frequencies[i];
+      sumY += amplitudesDB[i];
+      sumXY += frequencies[i] * amplitudesDB[i];
+      sumX2 += frequencies[i] * frequencies[i];
+    }
+    
+    // 傾き（dB/oct）を計算
+    let spectralSlope = 0;
+    if ((n * sumX2 - sumX * sumX) !== 0) {
+      spectralSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    }
+    
+    // 値を範囲内に制限
+    spectralSlope = Math.max(-30, Math.min(-2, spectralSlope));
     
     // 2.8kHz～3.2kHzの周波数帯域の最大振幅を計算
-    const startIdx = this.getFrequencyIndex(2800, sampleRate, fftSize);
-    const endIdx = this.getFrequencyIndex(3200, sampleRate, fftSize);
+    const bandStartIdx = this.getFrequencyIndex(2800, sampleRate, fftSize);
+    const bandEndIdx = this.getFrequencyIndex(3200, sampleRate, fftSize);
     
     let maxAmp = 0;
-    for (let i = startIdx; i <= endIdx; i++) {
+    for (let i = bandStartIdx; i <= bandEndIdx; i++) {
       if (i < frequencyData.length && frequencyData[i] > maxAmp) {
         maxAmp = frequencyData[i];
       }
@@ -69,15 +116,37 @@ export class FrequencyAnalysisService {
     
     const bandPeakRatio = (maxAmp / baseAmp) * 100;
     
+    // 2.5kHz～6kHzの周波数帯域の最大振幅を計算
+    const highFreqStartIdx = this.getFrequencyIndex(2500, sampleRate, fftSize);
+    const highFreqEndIdx = this.getFrequencyIndex(6000, sampleRate, fftSize);
+    
+    let highFreqMaxAmp = 0;
+    for (let i = highFreqStartIdx; i <= highFreqEndIdx; i++) {
+      if (i < frequencyData.length && frequencyData[i] > highFreqMaxAmp) {
+        highFreqMaxAmp = frequencyData[i];
+      }
+    }
+    
+    const highFreqRatio = (highFreqMaxAmp / baseAmp) * 100;
+    
     return {
-      harmonic2Ratio,
-      harmonic3Ratio,
-      bandPeakRatio
+      spectralSlope,
+      bandPeakRatio,
+      highFreqRatio
     };
   }
 
   /**
    * 周波数データを指定された高さにスケーリングする
+   * @param frequencyData 元の周波数データ
+   * @param targetHeight 目標の高さ
+   * @param maxFrequency 最大周波数（Hz）
+   * @param sampleRate サンプリングレート
+   * @returns スケーリングされた周波数データ
+   */
+  /**
+   * 周波数データを指定された高さにスケーリングする
+   * 周波数軸方向の平滑化を完全に解除するため、各ピクセルに対応する範囲の最大値を使用
    * @param frequencyData 元の周波数データ
    * @param targetHeight 目標の高さ
    * @param maxFrequency 最大周波数（Hz）
@@ -95,13 +164,37 @@ export class FrequencyAnalysisService {
     const filteredData = frequencyData.slice(0, dataLength);
     
     const scaledData = new Uint8Array(targetHeight);
-    const scaleFactor = filteredData.length / targetHeight;
     
+    // 各ピクセルに対応する元データの範囲を計算し、その範囲内の最大値を使用
     for (let y = 0; y < targetHeight; y++) {
       // 周波数を反転させる（低周波数が下、高周波数が上）
       const invertedY = targetHeight - y - 1;
-      const sourceIndex = Math.floor(y * scaleFactor);
-      scaledData[invertedY] = filteredData[sourceIndex];
+      
+      // このピクセルに対応する元データの範囲を計算
+      const startIdx = Math.floor((y / targetHeight) * filteredData.length);
+      const endIdx = Math.floor(((y + 1) / targetHeight) * filteredData.length);
+      
+      // 範囲内の最大値を取得
+      let maxValue = 0;
+      
+      // startIdxとendIdxが同じ場合（データ範囲が空の場合）は、
+      // 最も近い有効なデータポイントを使用する
+      if (startIdx === endIdx) {
+        // そのインデックスの値を直接使用
+        if (startIdx < filteredData.length) {
+          maxValue = filteredData[startIdx];
+        }
+      } else {
+        // 通常通り範囲内の最大値を取得
+        for (let i = startIdx; i < endIdx; i++) {
+          if (i < filteredData.length && filteredData[i] > maxValue) {
+            maxValue = filteredData[i];
+          }
+        }
+      }
+      
+      // 最大値を使用（平滑化なし、ピークを保持）
+      scaledData[invertedY] = maxValue;
     }
     
     return scaledData;

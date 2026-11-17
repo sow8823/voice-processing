@@ -37,16 +37,16 @@
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">2倍音強度平均</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ harmonic2Avg.toFixed(1) }}%</div>
+            <div class="text-caption text-medium-emphasis">スペクトル傾斜平均</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ spectralSlopeAvg !== undefined ? spectralSlopeAvg.toFixed(1) : '0.0' }} dB/oct</div>
           </v-card-text>
         </v-card>
       </v-col>
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">3倍音強度平均</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ harmonic3Avg.toFixed(1) }}%</div>
+            <div class="text-caption text-medium-emphasis">声区推定</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ getVoiceTypeFromSlope(spectralSlopeAvg) }}</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -54,7 +54,7 @@
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
             <div class="text-caption text-medium-emphasis">2.8kHz~3.2kHz 最大成分平均</div>
-            <div class="text-h6 font-weight-bold accent--text">{{ bandPeakAvg.toFixed(1) }}%</div>
+            <div class="text-h6 font-weight-bold accent--text">{{ bandPeakAvg !== undefined ? bandPeakAvg.toFixed(1) : '0.0' }}%</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -172,14 +172,14 @@ const getColor = (value: number): [number, number, number, number] => {
 
 // 目盛りとマーカーを描画する関数
 const drawScalesAndMarkers = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-  const maxFrequency = 10000;
+  const maxFrequency = 5000;
   
   // 周波数目盛りを描画（y軸）
   ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
   ctx.font = '10px sans-serif';
   ctx.textAlign = 'right';
   
-  for (let i = 0; i <= maxFrequency; i += 2000) {
+  for (let i = 0; i <= maxFrequency; i += 1000) {
     // 周波数を反転（低周波数が下、高周波数が上）
     const y = height - (i / maxFrequency) * height;
     ctx.fillText(`${i/1000}k`, 25, y);
@@ -323,7 +323,7 @@ const updateHeatmap = () => {
   }
   
   // ファイルの実際の長さを示す縦線（ファイルが10秒未満の場合）
-  if (props.duration < displayDuration) {
+  if (props.duration && props.duration < displayDuration) {
     const fileEndX = Math.floor(props.duration * timeResolution);
     
     // ファイル終了位置に縦線を描画
@@ -341,7 +341,7 @@ const updateHeatmap = () => {
   }
   
   // 現在の再生位置を示す白いラインを描画
-  if (props.currentPlaybackTime !== undefined && props.duration > 0) {
+  if (props.currentPlaybackTime !== undefined && props.duration && props.duration > 0) {
     // 再生位置が表示範囲内かチェック
     if (props.currentPlaybackTime >= viewStartTime.value && props.currentPlaybackTime <= viewEndTime.value) {
       // 表示範囲内での相対位置を計算
@@ -358,9 +358,23 @@ const updateHeatmap = () => {
   }
 };
 
+// スペクトル傾斜から声区を推定する関数
+function getVoiceTypeFromSlope(slope: number | undefined): string {
+  if (slope === undefined) return '-';
+  
+  if (slope >= -10 && slope <= -6) {
+    return '地声';
+  } else if (slope > -13 && slope < -10) {
+    return '中間';
+  } else if (slope >= -18 && slope <= -13) {
+    return '裏声';
+  } else {
+    return '不明';
+  }
+}
+
 // 比率を記録するキュー（過去5秒分を保存）
-const harmonic2Queue = ref<number[]>([]);
-const harmonic3Queue = ref<number[]>([]);
+const spectralSlopeQueue = ref<number[]>([]);
 const bandPeakQueue = ref<number[]>([]);
 
 const maxQueueSize = heatmapWidth; // ヒートマップの列数（約5秒分）
@@ -373,26 +387,20 @@ const getFrequencyIndex = (freq: number, sampleRate: number, fftSize: number) =>
 const updateHarmonicRatios = () => {
   if (!props.baseFrequency || props.baseFrequency < 50) return;
 
+  // FrequencyAnalysisServiceを使用してスペクトル傾斜を計算
+  const harmonicResult = frequencyAnalysisService.analyzeHarmonics(
+    props.frequencyData,
+    props.baseFrequency,
+    sampleRate
+  );
+
+  // スペクトル傾斜をキューに保存
+  spectralSlopeQueue.value.push(harmonicResult.spectralSlope);
+  if (spectralSlopeQueue.value.length > maxQueueSize) spectralSlopeQueue.value.shift();
+
   const fftSize = props.frequencyData.length * 2;
   const baseIdx = getFrequencyIndex(props.baseFrequency, sampleRate, fftSize);
-  const harmonic2Idx = getFrequencyIndex(props.baseFrequency * 2, sampleRate, fftSize);
-  const harmonic3Idx = getFrequencyIndex(props.baseFrequency * 3, sampleRate, fftSize);
-
-  if (harmonic2Idx >= props.frequencyData.length || harmonic3Idx >= props.frequencyData.length) return;
-
   const baseAmp = props.frequencyData[baseIdx] || 1;
-  const harmonic2Amp = props.frequencyData[harmonic2Idx] || 0;
-  const harmonic3Amp = props.frequencyData[harmonic3Idx] || 0;
-
-  // 2倍音・3倍音比率をキューに保存
-  const harmonic2Ratio = (harmonic2Amp / baseAmp) * 100;
-  const harmonic3Ratio = (harmonic3Amp / baseAmp) * 100;
-
-  harmonic2Queue.value.push(harmonic2Ratio);
-  harmonic3Queue.value.push(harmonic3Ratio);
-
-  if (harmonic2Queue.value.length > maxQueueSize) harmonic2Queue.value.shift();
-  if (harmonic3Queue.value.length > maxQueueSize) harmonic3Queue.value.shift();
 
   // 2.8kHz~3.2kHz の最大比率をキューに保存
   const startIdx = getFrequencyIndex(2800, sampleRate, fftSize);
@@ -411,12 +419,8 @@ const updateHarmonicRatios = () => {
 };
 
 // 5秒間の平均を計算
-const harmonic2Avg = computed(() => {
-  return frequencyAnalysisService.calculateAverage(harmonic2Queue.value);
-});
-
-const harmonic3Avg = computed(() => {
-  return frequencyAnalysisService.calculateAverage(harmonic3Queue.value);
+const spectralSlopeAvg = computed(() => {
+  return frequencyAnalysisService.calculateAverage(spectralSlopeQueue.value);
 });
 
 const bandPeakAvg = computed(() => {
@@ -456,8 +460,7 @@ const resetHeatmap = () => {
   console.log('ファイル分析ヒートマップをリセットします');
   
   // キューをクリア
-  harmonic2Queue.value = [];
-  harmonic3Queue.value = [];
+  spectralSlopeQueue.value = [];
   bandPeakQueue.value = [];
   
   // キャンバスをクリア

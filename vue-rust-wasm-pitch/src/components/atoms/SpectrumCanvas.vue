@@ -7,16 +7,16 @@
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">2倍音強度</div>
-            <div class="text-h6 font-weight-bold secondary--text">{{ harmonic2Ratio.toFixed(1) }}%</div>
+            <div class="text-caption text-medium-emphasis">スペクトル傾斜</div>
+            <div class="text-h6 font-weight-bold secondary--text">{{ spectralSlope !== undefined ? spectralSlope.toFixed(1) : '0.0' }} dB/oct</div>
           </v-card-text>
         </v-card>
       </v-col>
       <v-col cols="12" sm="4">
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
-            <div class="text-caption text-medium-emphasis">3倍音強度</div>
-            <div class="text-h6 font-weight-bold secondary--text">{{ harmonic3Ratio.toFixed(1) }}%</div>
+            <div class="text-caption text-medium-emphasis">声区推定</div>
+            <div class="text-h6 font-weight-bold secondary--text">{{ getVoiceTypeFromSlope(spectralSlope) }}</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -24,7 +24,7 @@
         <v-card variant="outlined" class="pa-2">
           <v-card-text class="pa-2">
             <div class="text-caption text-medium-emphasis">2.8kHz~3.2kHz 最大成分</div>
-            <div class="text-h6 font-weight-bold secondary--text">{{ bandPeakRatio.toFixed(1) }}%</div>
+            <div class="text-h6 font-weight-bold secondary--text">{{ bandPeakRatio !== undefined ? bandPeakRatio.toFixed(1) : '0.0' }}%</div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -105,8 +105,12 @@ const drawFrequencySpectrum = (frequencyData: Uint8Array) => {
     ctx.fillText('Hz', width - 10, height - 10);
 
     // 周波数スペクトルを描画
-    const barWidth = width / filteredData.length;
-    const barSpacing = 0.2; // バー間のスペース（ピクセル）
+    // データポイントが多すぎる場合は間引いて表示する
+    const maxBars = 1024; // 最大バー数を制限
+    const skipFactor = Math.ceil(filteredData.length / maxBars);
+    const effectiveDataLength = Math.ceil(filteredData.length / skipFactor);
+    const barWidth = width / effectiveDataLength;
+    const barSpacing = Math.min(0.2, barWidth * 0.1); // バー間のスペース（バー幅の10%を上限とする）
 
     // グラデーションを作成
     const barGradient = ctx.createLinearGradient(0, height, 0, 0);
@@ -137,9 +141,20 @@ const drawFrequencySpectrum = (frequencyData: Uint8Array) => {
     }
 
     // バーを描画
-    filteredData.forEach((value, index) => {
-      const x = index * barWidth;
-      const barHeight = (value / 255) * (height - 30); // 正規化して高さを計算（ラベル用に下部に余白を残す）
+    for (let i = 0; i < filteredData.length; i += skipFactor) {
+      // 間引いたデータのインデックス
+      const displayIndex = Math.floor(i / skipFactor);
+      
+      // このバーの最大値を取得（間引く場合は範囲内の最大値を使用）
+      let maxValue = filteredData[i];
+      for (let j = 1; j < skipFactor && i + j < filteredData.length; j++) {
+        if (filteredData[i + j] > maxValue) {
+          maxValue = filteredData[i + j];
+        }
+      }
+      
+      const x = displayIndex * barWidth;
+      const barHeight = (maxValue / 255) * (height - 30); // 正規化して高さを計算（ラベル用に下部に余白を残す）
       
       // 特定の周波数を強調表示
       const isSpecialFreq =
@@ -155,10 +170,10 @@ const drawFrequencySpectrum = (frequencyData: Uint8Array) => {
       }
       
       // 角丸の長方形を描画
-      const radius = 2;
+      const radius = Math.min(2, barWidth / 4); // バー幅に応じて角丸の半径を調整
       const barX = x;
       const barY = height - barHeight - 20; // 下部にラベル用の余白を確保
-      const barW = barWidth - barSpacing;
+      const barW = Math.max(1, barWidth - barSpacing); // 最小幅を1pxに制限
       const barH = barHeight;
       
       if (barH > 0) {
@@ -175,7 +190,7 @@ const drawFrequencySpectrum = (frequencyData: Uint8Array) => {
         ctx.closePath();
         ctx.fill();
       }
-    });
+    }
     
     // 基本周波数と倍音の位置にマーカーを表示
     if (props.baseFrequency > 50) {
@@ -228,19 +243,24 @@ const harmonicAnalysis = computed(() => {
   );
 });
 
-// 2倍音の強度比率
-const harmonic2Ratio = computed(() => {
-  return harmonicAnalysis.value.harmonic2Ratio;
-});
-
-// 3倍音の強度比率
-const harmonic3Ratio = computed(() => {
-  return harmonicAnalysis.value.harmonic3Ratio;
+// スペクトル傾斜
+const spectralSlope = computed(() => {
+  return harmonicAnalysis.value.spectralSlope;
 });
 
 // 特定の周波数帯域の最大成分比率
 const bandPeakRatio = computed(() => {
   return harmonicAnalysis.value.bandPeakRatio;
+});
+
+// 2.5kHzから6kHzの範囲の高周波成分比率
+const highFreqRatio = computed(() => {
+  return harmonicAnalysis.value.highFreqRatio;
+});
+
+// 高周波成分が基音の3分の1以上あるかどうか
+const hasStrongHighFreq = computed(() => {
+  return highFreqRatio.value >= 33.3; // 基音の3分の1（33.3%）以上
 });
 
 // テーマが変更されたときに再描画
@@ -266,6 +286,28 @@ watch(spectrumCanvas, (canvas) => {
     drawFrequencySpectrum(props.frequencyData);
   }
 });
+
+// スペクトル傾斜と高周波成分から声区を推定する関数
+function getVoiceTypeFromSlope(slope: number | undefined): string {
+  if (slope === undefined) return '-';
+  
+  // 2.5kHzから6kHzの範囲で基音に対して3分の1以上の振幅を持つかどうかをチェック
+  // 高周波成分がなければ裏声と判断
+  if (!hasStrongHighFreq.value) {
+    return '裏声';
+  }
+  
+  // 高周波成分がある場合はスペクトル傾斜で判断
+  if (slope >= -10 && slope <= -2) {
+    return '地声';
+  } else if (slope > -13 && slope < -10) {
+    return '中間';
+  } else if (slope >= -30 && slope <= -13) {
+    return '裏声';
+  } else {
+    return '不明';
+  }
+}
 </script>
 
 <style scoped>
